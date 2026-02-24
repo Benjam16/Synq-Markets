@@ -27,7 +27,7 @@ interface MarketInfo {
 
 let _marketInfoMap: Map<string, MarketInfo> = new Map();
 let _marketInfoMapAge = 0;
-const MARKET_INFO_MAP_TTL = 120_000; // 2 minutes (direct API calls are heavier)
+const MARKET_INFO_MAP_TTL = 300_000; // 5 minutes — avoid re-fetching too often
 
 /**
  * Build the market info map by calling Kalshi & Polymarket APIs DIRECTLY,
@@ -50,7 +50,7 @@ async function ensureMarketInfoMap(): Promise<void> {
     if (accessKey && privateKey) {
       let cursor: string | undefined;
       let pagesFetched = 0;
-      const MAX_PAGES = 10; // Cap at 10 pages (2000 events) for better name coverage
+      const MAX_PAGES = 3; // Cap at 3 pages (600 events) for fast loading
 
       while (pagesFetched < MAX_PAGES) {
         const path = '/trade-api/v2/events';
@@ -747,9 +747,30 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     fetchMarketTicks(),
   ]);
 
-  // Merge trades
-  const allTrades = [...polyTrades, ...kalshiTrades]
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  // Interleave trades (alternate Poly / Kalshi for a balanced feed)
+  const allTrades: TerminalTrade[] = [];
+  const pLen = polyTrades.length;
+  const kLen = kalshiTrades.length;
+  const maxLen = Math.max(pLen, kLen);
+  // Ratio-based interleaving: if one list is much longer, space the shorter evenly
+  if (kLen === 0) {
+    allTrades.push(...polyTrades);
+  } else if (pLen === 0) {
+    allTrades.push(...kalshiTrades);
+  } else {
+    let pi = 0, ki = 0;
+    // Interleave proportionally
+    const ratio = pLen / (pLen + kLen); // e.g. 0.8 if 80% poly
+    for (let i = 0; i < pLen + kLen; i++) {
+      const targetPolyCount = Math.round(ratio * (i + 1));
+      if (pi < pLen && (pi < targetPolyCount || ki >= kLen)) {
+        allTrades.push(polyTrades[pi++]);
+      } else if (ki < kLen) {
+        allTrades.push(kalshiTrades[ki++]);
+      }
+    }
+  }
+  console.log(`[Terminal] Merged: ${pLen} Poly + ${kLen} Kalshi = ${allTrades.length} interleaved`);
 
   // Update caches
   const existingIds = new Set(tradeCache.map(t => t.id));
