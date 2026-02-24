@@ -6,7 +6,6 @@ import {
   X, TrendingUp, TrendingDown, BarChart3, DollarSign,
   ExternalLink, Copy, Zap, ArrowRight, ArrowDown, ArrowUp,
 } from 'lucide-react';
-import Image from 'next/image';
 import { createChart, ColorType } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, AreaSeriesOptions } from 'lightweight-charts';
 import { toast } from 'react-hot-toast';
@@ -334,11 +333,10 @@ export default function ChartModal({
             {/* Market Image */}
             {trade.imageUrl && !imgError ? (
               <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-[#1A1A1A]">
-                <Image
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
                   src={trade.imageUrl}
                   alt={trade.marketName}
-                  width={40}
-                  height={40}
                   className="object-cover w-full h-full"
                   onError={() => setImgError(true)}
                 />
