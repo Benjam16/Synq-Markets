@@ -362,12 +362,12 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
       // Step 1: Try to get existing user
       try {
         const getUserRes = await fetch(`/api/user?email=${encodeURIComponent(user.email)}`);
-        if (getUserRes.ok) {
-          const { user: dbUser } = await getUserRes.json();
+      if (getUserRes.ok) {
+        const { user: dbUser } = await getUserRes.json();
           userId = dbUser?.id ?? null;
         } else if (getUserRes.status === 404) {
           // User not found — will create below
-        } else {
+      } else {
           // Server error — log but still try to create
           const errData = await getUserRes.json().catch(() => ({}));
           console.warn('[Trade] GET /api/user failed:', getUserRes.status, errData);
@@ -379,16 +379,16 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
       // Step 2: If user not found, create them
       if (!userId) {
         try {
-          const createRes = await fetch('/api/user', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              supabaseUserId: user.id,
-              email: user.email,
+        const createRes = await fetch('/api/user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            supabaseUserId: user.id,
+            email: user.email,
               fullName: user.user_metadata?.full_name || user.email.split('@')[0],
-            }),
-          });
-          if (createRes.ok) {
+          }),
+        });
+        if (createRes.ok) {
             const data = await createRes.json();
             userId = data.userId ?? data.user?.id ?? null;
           } else {

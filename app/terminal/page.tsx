@@ -229,6 +229,7 @@ export default function TerminalPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const userIdCacheRef = useRef<number | null>(null);
   const seenWhaleIdsRef = useRef<Set<string>>(new Set());
+  const instantSettingsRef = useRef<HTMLDivElement>(null);
 
   const { user } = useAuth();
   const router = useRouter();
@@ -255,6 +256,18 @@ export default function TerminalPage() {
     setShowTutorial(false);
     try { localStorage.setItem('terminal-tutorial-seen', '1'); } catch {}
   }, []);
+
+  // ── Close instant settings on click outside ──
+  useEffect(() => {
+    if (!showInstantSettings) return;
+    const handler = (e: MouseEvent) => {
+      if (instantSettingsRef.current && !instantSettingsRef.current.contains(e.target as Node)) {
+        setShowInstantSettings(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showInstantSettings]);
 
   // ── Sound Effect ──
   useEffect(() => {
@@ -819,7 +832,7 @@ export default function TerminalPage() {
           {/* Right: Instant Trade Settings + Sound + Stats */}
           <div className="flex items-center gap-4">
             {/* Instant Trade Settings */}
-            <div className="relative">
+            <div className="relative" ref={instantSettingsRef}>
               <button
                 onClick={() => setShowInstantSettings(!showInstantSettings)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
