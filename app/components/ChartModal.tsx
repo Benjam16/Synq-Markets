@@ -6,8 +6,8 @@ import {
   X, TrendingUp, TrendingDown, BarChart3, DollarSign,
   ExternalLink, Copy, Zap, ArrowRight, ArrowDown, ArrowUp,
 } from 'lucide-react';
-import { createChart, ColorType } from 'lightweight-charts';
-import type { IChartApi, ISeriesApi, AreaSeriesOptions } from 'lightweight-charts';
+import { createChart, ColorType, AreaSeries } from 'lightweight-charts';
+import type { IChartApi } from 'lightweight-charts';
 import { toast } from 'react-hot-toast';
 
 // ============================================================================
@@ -245,25 +245,13 @@ export default function ChartModal({
       },
     });
 
-    // lightweight-charts v5: use addSeries with 'Area' type
-    const areaSeries = (chart as any).addSeries
-      ? (chart as any).addSeries({
-          type: 'Area',
-          lineColor: '#4FFFC8',
-          topColor: 'rgba(79, 255, 200, 0.3)',
-          bottomColor: 'rgba(79, 255, 200, 0.02)',
-          lineWidth: 2,
-          priceFormat: {
-            type: 'custom',
-            formatter: (p: number) => `${p.toFixed(1)}¢`,
-          },
-        })
-      : (chart as any).addAreaSeries({
-          lineColor: '#4FFFC8',
-          topColor: 'rgba(79, 255, 200, 0.3)',
-          bottomColor: 'rgba(79, 255, 200, 0.02)',
-          lineWidth: 2,
-        });
+    // lightweight-charts v5: addSeries(AreaSeries, options)
+    const areaSeries = chart.addSeries(AreaSeries, {
+      lineColor: '#4FFFC8',
+      topColor: 'rgba(79, 255, 200, 0.3)',
+      bottomColor: 'rgba(79, 255, 200, 0.02)',
+      lineWidth: 2,
+    });
 
     // Deduplicate timestamps (lightweight-charts requires unique times)
     const uniqueData = new Map<number, number>();

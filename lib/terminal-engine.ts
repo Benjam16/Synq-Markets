@@ -50,7 +50,7 @@ async function ensureMarketInfoMap(): Promise<void> {
     if (accessKey && privateKey) {
       let cursor: string | undefined;
       let pagesFetched = 0;
-      const MAX_PAGES = 5; // Cap at 5 pages (1000 events) to avoid slowdown
+      const MAX_PAGES = 10; // Cap at 10 pages (2000 events) for better name coverage
 
       while (pagesFetched < MAX_PAGES) {
         const path = '/trade-api/v2/events';
@@ -202,15 +202,50 @@ function resolveExternalUrl(ticker: string, provider: 'Polymarket' | 'Kalshi', f
   return `https://polymarket.com`;
 }
 
+// Known Kalshi sports-parlay / per-game ticker prefixes.
+// These produce unreadable market names and flood the terminal.
+const KALSHI_SPORTS_PREFIXES = [
+  'KXMVE',   // multi-game parlays
+  'KXATP',   // ATP tennis
+  'KXWTA',   // WTA tennis
+  'KXNCAA',  // NCAA (all sports)
+  'KXNBA',   // NBA
+  'KXNFL',   // NFL
+  'KXNHL',   // NHL
+  'KXMLB',   // MLB
+  'KXMLS',   // MLS
+  'KXEPL',   // English Premier League
+  'KXLIGA',  // La Liga
+  'KXSERA',  // Serie A
+  'KXBUND',  // Bundesliga
+  'KXUFC',   // UFC
+  'KXLOL',   // League of Legends / esports
+  'KXCS',    // CS:GO / esports
+  'KXDOTA',  // Dota 2 / esports
+  'KXF1',    // Formula 1
+  'KXPGA',   // PGA golf
+  'KXLPGA',  // LPGA golf
+  'KXCFB',   // College football
+  'KXCBB',   // College basketball
+  'KXWNBA',  // WNBA
+  'KXUSL',   // USL soccer
+  'KXLIGA',  // Liga MX
+  'KXNASCAR',// NASCAR
+];
+
+function isKalshiSportsTicker(ticker: string): boolean {
+  const t = (ticker || '').toUpperCase();
+  return KALSHI_SPORTS_PREFIXES.some(prefix => t.startsWith(prefix));
+}
+
 // Filter for ugly auto-generated markets that users wouldn't understand
 function isUglyTicker(ticker: string, name: string): boolean {
   if (!ticker && !name) return false;
   const t = (ticker || '').toUpperCase();
-  // KXMVE = sports multi-game parlays — always filter
-  if (t.startsWith('KXMVE')) return true;
-  // Only filter names that are EXACTLY a raw ticker with no spaces
-  // (resolved names always have spaces; raw tickers like "KXBTC-26FEB25" don't)
-  if (name && name === ticker) return true; // Name wasn't resolved at all
+  // Sports tickers — always filter
+  if (isKalshiSportsTicker(t)) return true;
+  // Names that are EXACTLY a raw ticker with no spaces
+  if (name && name === ticker) return true;
   return false;
 }
 
@@ -495,17 +530,18 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
     const realTrades = trades
       .filter((t: any) => {
         const ticker = (t.ticker || t.market_ticker || '').toUpperCase();
-        // Filter out KXMVE sports parlays — keep everything else
-        return !ticker.startsWith('KXMVE');
+        // Filter out all sports/per-game tickers
+        return !isKalshiSportsTicker(ticker);
       })
       .map((t: any, idx: number) => {
         const price = (t.yes_price || t.no_price || t.price || 50) / 100;
         const shares = t.count || t.size || 1;
         const notional = price * shares;
         const ticker = t.ticker || t.market_ticker || '';
-        const resolvedName = resolveMarketName(ticker, t.market_title || t.title || ticker || `Kalshi Trade`);
-        const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
         const resolvedInfo = resolveMarketInfo(ticker);
+        const resolvedName = resolvedInfo?.name
+          || t.market_title || t.title || '';
+        const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
 
         return {
           id: `kalshi-${t.trade_id || `${Date.now()}-${idx}`}`,
@@ -525,9 +561,16 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           category: resolvedInfo?.category || '',
           imageUrl: resolvedInfo?.imageUrl || '',
         };
+      })
+      // Drop trades where the name is still an unresolved raw ticker
+      .filter((trade: any) => {
+        if (!trade.marketName) return false;
+        // If the name contains no spaces and starts with KX, it's an unresolved ticker
+        if (trade.marketName.startsWith('KX') && !trade.marketName.includes(' ')) return false;
+        return true;
       });
 
-    console.log(`[Terminal] Kalshi: ${trades.length} raw → ${realTrades.length} after KXMVE filter`);
+    console.log(`[Terminal] Kalshi: ${trades.length} raw → ${realTrades.length} after sports + name filter`);
     return realTrades;
   } catch (err) {
     console.warn('[Terminal] Kalshi trades fetch error:', err);
