@@ -38,10 +38,15 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { Market } from '@/lib/types';
 import TradePanel from '../components/TradePanel';
 import { useAuth } from '../components/AuthProvider';
 import { toast } from 'react-hot-toast';
+
+// Lazy load ChartModal for better initial performance
+const ChartModal = dynamic(() => import('../components/ChartModal'), { ssr: false });
 
 // ============================================================================
 // TYPES (mirrored from terminal-engine)
@@ -65,6 +70,7 @@ interface TerminalTrade {
   externalUrl?: string;
   slug?: string;
   category?: string;
+  imageUrl?: string;
 }
 
 interface WhaleAlert {
@@ -226,6 +232,7 @@ export default function TerminalPage() {
   const [quickTradeMarket, setQuickTradeMarket] = useState<Market | null>(null);
   const [isQuickTradeOpen, setIsQuickTradeOpen] = useState(false);
   const [copiedTrade, setCopiedTrade] = useState<string | null>(null);
+  const [chartTrade, setChartTrade] = useState<TerminalTrade | null>(null);
 
   // ── Instant Trade State ──
   const [instantTradeShares, setInstantTradeShares] = useState<number>(10);
@@ -376,7 +383,7 @@ export default function TerminalPage() {
       price,
       yesPrice: price,
       noPrice: 1 - price,
-      imageUrl: '',
+      imageUrl: ('imageUrl' in trade ? (trade as TerminalTrade).imageUrl : '') || '',
       polymarketUrl: provider === 'Polymarket' ? ('externalUrl' in trade ? (trade as TerminalTrade).externalUrl || '' : '') : '',
       kalshiUrl: provider === 'Kalshi' ? (trade.externalUrl || '') : '',
       slug: ('slug' in trade ? (trade as TerminalTrade).slug : '') || '',
@@ -487,11 +494,31 @@ export default function TerminalPage() {
     setIsQuickTradeOpen(true);
   }, [buildMarketFromTrade]);
 
-  // ── Open Market Modal (view full market card) ──
+  // ── Open Chart Modal (TradingView-style view with order book + trading) ──
   const openMarketModal = useCallback((trade: TerminalTrade | WhaleAlert) => {
-    const market = buildMarketFromTrade(trade);
-    setSelectedMarket(market);
-  }, [buildMarketFromTrade]);
+    // Convert WhaleAlert to TerminalTrade shape for the chart modal
+    const chartData: TerminalTrade = {
+      id: trade.id,
+      provider: trade.provider,
+      type: ('type' in trade ? trade.type : 'FILL') as TerminalTrade['type'],
+      marketId: trade.marketId,
+      marketName: trade.marketName,
+      side: trade.side as TerminalTrade['side'],
+      price: trade.price,
+      priceCents: `${(trade.price * 100).toFixed(1)}¢`,
+      shares: trade.shares,
+      notional: trade.notional,
+      fee: ('fee' in trade ? (trade as TerminalTrade).fee : 0),
+      timestamp: trade.timestamp,
+      walletAddress: trade.walletAddress,
+      isWhale: ('isWhale' in trade ? (trade as TerminalTrade).isWhale : true),
+      externalUrl: trade.externalUrl,
+      slug: ('slug' in trade ? (trade as TerminalTrade).slug : ''),
+      category: ('category' in trade ? (trade as TerminalTrade).category : ''),
+      imageUrl: ('imageUrl' in trade ? (trade as TerminalTrade).imageUrl : ''),
+    };
+    setChartTrade(chartData);
+  }, []);
 
   // ── Data Polling (optimized: immediate fetch + 2s interval) ──
   const tradesRef = useRef<TerminalTrade[]>([]);
@@ -1747,151 +1774,25 @@ export default function TerminalPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          MARKET DETAIL MODAL (Enhanced — shows full card with Yes/No odds)
+          CHART MODAL — TradingView-style popup with chart, order book, trading
           ══════════════════════════════════════════════════════════════════════ */}
-      <AnimatePresence>
-        {selectedMarket && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-            onClick={() => setSelectedMarket(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-2xl bg-[#0a0a0a] border border-[#1A1A1A] rounded-2xl overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Modal Header */}
-              <div className="flex items-center justify-between p-4 border-b border-[#1A1A1A]">
-                <div className="flex items-center gap-3">
-                  {selectedMarket.provider === 'Kalshi' ? (
-                    <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                      KALSHI
-                    </span>
-                  ) : (
-                    <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                      POLY
-                    </span>
-                  )}
-                  <span className="text-xs text-slate-500 uppercase tracking-wider">{selectedMarket.category}</span>
-                </div>
-                <button
-                  onClick={() => setSelectedMarket(null)}
-                  className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-                >
-                  <X className="w-4 h-4 text-slate-400" />
-                </button>
-              </div>
-
-              {/* Modal Content */}
-              <div className="p-6">
-                <h3 className="text-xl font-bold text-white mb-4">{selectedMarket.eventTitle || selectedMarket.name}</h3>
-
-                {/* Yes / No Odds Display */}
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div className="p-4 bg-[#4FFFC8]/5 rounded-xl border border-[#4FFFC8]/20">
-                    <div className="text-[10px] text-[#4FFFC8] uppercase tracking-wider font-bold mb-1">Yes</div>
-                    <div className="text-3xl font-mono font-bold text-[#4FFFC8]">
-                      {((selectedMarket.yesPrice ?? selectedMarket.price) * 100).toFixed(1)}¢
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {((selectedMarket.yesPrice ?? selectedMarket.price) * 100).toFixed(0)}% probability
-                    </div>
-                  </div>
-                  <div className="p-4 bg-red-500/5 rounded-xl border border-red-500/20">
-                    <div className="text-[10px] text-red-400 uppercase tracking-wider font-bold mb-1">No</div>
-                    <div className="text-3xl font-mono font-bold text-red-400">
-                      {((selectedMarket.noPrice ?? (1 - selectedMarket.price)) * 100).toFixed(1)}¢
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {((selectedMarket.noPrice ?? (1 - selectedMarket.price)) * 100).toFixed(0)}% probability
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stats Row */}
-                <div className="grid grid-cols-3 gap-4 mb-6">
-                  <div className="p-3 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Price</div>
-                    <div className="text-xl font-mono font-bold text-white">
-                      ${selectedMarket.price.toFixed(2)}
-                    </div>
-                  </div>
-                  <div className="p-3 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Volume</div>
-                    <div className="text-xl font-mono font-bold text-white">
-                      {formatUSD(selectedMarket.volume)}
-                    </div>
-                  </div>
-                  <div className="p-3 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Provider</div>
-                    <div className="text-xl font-bold text-white">
-                      {selectedMarket.provider}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex items-center gap-3">
-                  {/* Trade This Market — opens trade panel */}
-                  <button
-                    onClick={() => {
-                      const mkt = selectedMarket;
-                      setSelectedMarket(null);
-                      setQuickTradeMarket(mkt);
-                      setIsQuickTradeOpen(true);
-                    }}
-                    className="flex-1 py-3 rounded-xl bg-[#4FFFC8] text-black font-bold text-sm text-center hover:bg-[#3de6b3] transition-colors"
-                  >
-                    Trade This Market
-                  </button>
-
-                  {/* Open in Markets Tab */}
-                  <Link
-                    href={`/markets?search=${encodeURIComponent((selectedMarket.eventTitle || selectedMarket.name).slice(0, 40))}`}
-                    onClick={() => setSelectedMarket(null)}
-                    className="px-4 py-3 rounded-xl border border-[#1A1A1A] text-slate-400 hover:text-white hover:border-[#4FFFC8]/30 transition-colors"
-                    title="View in Markets"
-                  >
-                    <Search className="w-4 h-4" />
-                  </Link>
-
-                  {/* External Link */}
-                  <a
-                    href={
-                      selectedMarket.provider === 'Kalshi'
-                        ? (selectedMarket.kalshiUrl || `https://kalshi.com/markets`)
-                        : (selectedMarket.polymarketUrl || `https://polymarket.com`)
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-3 rounded-xl border border-[#1A1A1A] text-slate-400 hover:text-white hover:border-[#4FFFC8]/30 transition-colors"
-                    title={`Open on ${selectedMarket.provider}`}
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
-
-                  {/* Copy */}
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${selectedMarket.name} - $${selectedMarket.price.toFixed(2)}`);
-                      toast.success('Copied!', { duration: 1500 });
-                    }}
-                    className="px-4 py-3 rounded-xl border border-[#1A1A1A] text-slate-400 hover:text-white hover:border-[#4FFFC8]/30 transition-colors"
-                    title="Copy market info"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {chartTrade && (
+        <ChartModal
+          trade={chartTrade}
+          allTrades={trades}
+          isOpen={!!chartTrade}
+          onClose={() => setChartTrade(null)}
+          onInstantTrade={(t) => {
+            setChartTrade(null);
+            executeInstantTrade(t as any);
+          }}
+          onOpenTradePanel={(t) => {
+            setChartTrade(null);
+            openTradePanel(t as any);
+          }}
+          instantTradeShares={instantTradeShares}
+        />
+      )}
 
       {/* Quick Trade Panel (full trade UI — expand button) */}
       {isQuickTradeOpen && quickTradeMarket && (
