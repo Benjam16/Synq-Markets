@@ -1,0 +1,401 @@
+@import "tailwindcss";
+
+/* Predexon Palette */
+:root {
+  --background: #050505;
+  --foreground: #ffffff;
+  --border: #1A1A1A;
+  --card-bg: rgba(15, 15, 15, 0.8);
+  --hover-bg: #1A1A1A;
+  --primary: #4FFFC8;
+  --primary-hover: #3debb8;
+  --secondary: #7B61FF;
+  --success: #10b981;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --muted: #64748b;
+  --muted-foreground: #94a3b8;
+  --cyan-glow: 0 0 20px rgba(79, 255, 200, 0.3);
+  --gradient-cyan-indigo: linear-gradient(135deg, #4FFFC8 0%, #7B61FF 100%);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --font-sans: var(--font-inter), var(--font-geist-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: var(--font-geist-mono);
+}
+
+@layer base {
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  }
+}
+
+::selection {
+  background: #4FFFC8;
+  color: black;
+}
+
+body {
+  background: var(--background);
+  color: #94a3b8;
+  font-family: var(--font-inter), var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  position: relative;
+}
+
+/* Premium Noise Texture Overlay - disabled to prevent stacking issues */
+
+/* Typography improvements - Premium Institutional Style */
+h1, h2 {
+  font-family: 'Inter', var(--font-geist-sans), sans-serif;
+  letter-spacing: -0.04em; /* Tighter tracking */
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+h3, h4, h5, h6 {
+  font-family: 'Inter', var(--font-geist-sans), sans-serif;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+/* Monospace font for financial numbers */
+.mono-number,
+[class*="price"],
+[class*="balance"],
+[class*="equity"],
+[class*="pnl"],
+[class*="percentage"],
+[class*="volume"] {
+  font-family: 'JetBrains Mono', 'Geist Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-variant-numeric: tabular-nums; /* Aligns numbers properly */
+  letter-spacing: 0.02em;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  /* Improve touch targets */
+  button, a, input, select, textarea {
+    min-height: 44px; /* iOS recommended touch target */
+  }
+  
+  /* Better text sizing on mobile */
+  body {
+    font-size: 16px; /* Prevent iOS zoom on input focus */
+  }
+  
+  /* Prevent horizontal scroll */
+  * {
+    max-width: 100%;
+  }
+  
+  /* Improve scrolling */
+  html {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Professional animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.pulse-subtle {
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Hide scrollbar for category navigation */
+#category-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+#category-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Hide scrollbar for markets footer */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Custom scrollbar for top navigation */
+#top-nav-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+#top-nav-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#top-nav-scroll::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+#top-nav-scroll::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Custom scrollbar for tooltip */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #0f172a;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Firefox scrollbar for tooltip */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #475569 #0f172a;
+}
+
+/* Premium Button Interactions */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.btn-premium {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-premium:hover {
+  box-shadow: 0 0 20px rgba(79, 255, 200, 0.3);
+}
+
+.btn-premium:active {
+  transform: scale(0.98);
+}
+
+.btn-premium.shimmer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(79, 255, 200, 0.1),
+    transparent
+  );
+  animation: shimmer 5s infinite;
+}
+
+/* Predexon Button Styles */
+.btn-primary {
+  border-radius: 9999px;
+  padding: 0.75rem 1.5rem;
+  font-weight: 700;
+  color: black;
+  transition: all 0.2s;
+  background: #4FFFC8;
+  box-shadow: 0 0 20px rgba(79, 255, 200, 0.3);
+}
+.btn-primary:hover {
+  background: #3debb8;
+  box-shadow: 0 0 25px rgba(79, 255, 200, 0.4);
+}
+
+.btn-ghost {
+  border-radius: 9999px;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  color: white;
+  transition: all 0.2s;
+  background: transparent;
+  border: 1px solid #1A1A1A;
+}
+.btn-ghost:hover {
+  border-color: rgba(79, 255, 200, 0.3);
+  background: rgba(79, 255, 200, 0.05);
+}
+
+/* Gradient text for emphasis */
+.text-gradient-cyan-indigo {
+  background: linear-gradient(135deg, #4FFFC8 0%, #7B61FF 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Homepage: Radial Glow Background */
+.bg-radial-glow {
+  background: radial-gradient(
+    ellipse 80% 80% at 50% 50%,
+    rgba(79, 255, 200, 0.08) 0%,
+    rgba(123, 97, 255, 0.04) 30%,
+    transparent 70%
+  );
+}
+
+/* Dashboard/Leaderboard: Grid Background */
+.bg-grid-trading {
+  background-image: 
+    linear-gradient(to right, #121212 1px, transparent 1px),
+    linear-gradient(to bottom, #121212 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-color: #050505;
+}
+
+/* Glassmorphism */
+.glass-dark {
+  background: rgba(15, 15, 15, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Floating status card */
+.card-floating {
+  background: rgba(15, 15, 15, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Live dot indicator */
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4FFFC8;
+  box-shadow: 0 0 8px rgba(79, 255, 200, 0.6);
+  animation: pulse-live 2s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Capsule toggle - active */
+.tab-capsule-active {
+  background: linear-gradient(135deg, #4FFFC8 0%, #7B61FF 100%);
+  color: black;
+}
+.tab-capsule-active.text-white {
+  color: white;
+}
+
+/* API code block */
+.code-block-get {
+  font-family: 'JetBrains Mono', 'Geist Mono', monospace;
+  font-size: 12px;
+  color: #10b981;
+  border: 1px solid #1A1A1A;
+}
+
+/* Global Icon Stroke Width - Thinner, more elegant */
+svg[stroke-width] {
+  stroke-width: 1.5 !important;
+}
+
+/* Lucide icons specifically */
+.lucide {
+  stroke-width: 1.5;
+}
+
+/* ── Scrolling ribbon animations ── */
+@keyframes scroll-left {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes scroll-right {
+  0%   { transform: translateX(-50%); }
+  100% { transform: translateX(0); }
+}
+
+.animate-scroll-left {
+  animation: scroll-left 40s linear infinite;
+  width: max-content;
+}
+.animate-scroll-right {
+  animation: scroll-right 40s linear infinite;
+  width: max-content;
+}

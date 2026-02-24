@@ -1,0 +1,36 @@
+#!/bin/bash
+# Helper script to set Kalshi environment variables
+# Usage: source scripts/set_kalshi_env.sh
+
+export KALSHI_ACCESS_KEY="09f01a48-d5de-463b-bb57-1f157f93c2b4"
+export KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEAnQembugZ4w1O+vnAfSVWuICH/mg0ucjXNmsGr8XvKk4OSf1M
+rTHSb01MMpAaBVpQJNY1apTa7/hFESKXpK/GCuRk8klksTmhBRXSlS3f8q9Wss3j
+iv+5IhyDOOXGGU/Vt9rqRgVxL0059Db0QCs9007wq1SoHJajcWwWaZrlGDTtKMAJ
+hOiWOyZCzJgep6SJ/TtZi4s+SJqd6Z55jVJD85JyQ8Yfgp6fGnbpqzDVJortlP5s
+KNNnsL7xvMfFXaQAPrz3rD99Xt20eFffz0yP/Lni/5ToIjUGEDGljkCVkfKQecjg
+T5lfX3zD3Reo2JzME/2IEIxUhJI+9Rtf2am8dwIDAQABAoIBABtZ1MRmivPAQqx2
+Se/CTCuQv58xWVWuxMWGuMBu8mxk8hozE2LrVaLrTMVV0iJyi5kO8njg+o1nqegF
+JXKa5xzIkUiePfqcdg5jsa0oM2Sa47f7IpH4Xq+xVa3YX7vS6v++EqYlloRNqDWA
+SOTQY1Fl44eEFE/+cPN1hyXXw+WGNI1S+8kg8tnDTE7nQvuM/X6MFkdhFcMxgVvT
+2tyt6UzBUK1V3NNNiu3T6qz5fWTw7nG01L7yjUMChT1ieozJgwMPcHMcWbDDMFpI
+qq/o/iMqIbQQjZ3qaeVH/F+dl5eX++mbbQAW4HrASt3e9VwYWZqYP6h/WFcjIoNo
+jv3SzWECgYEA0N8s7xiqjzNDvKn1IBLEVG1bxzFtUFbQqqtfwNU+WQf8V7FyF6S7
+YYQHU6Eu01og53jfSgHKuryUfhx4q4EhX7W9dtwGtgVP93Vx30NgFaODHzKfegU2
+vFnk5fhyqXoceaoPB+aUMpZdLva4am0ndeoWizfWcPGsaxgJI7BTo/ECgYEAwHX9
+YWxLCQ5ALQ1dDGDNQflsJU2juTxUOGv9lEOIHEnr4D9tZELBH90yA4GEAYULmV8J
+WNVk7x9GUobQ8+MaMNZzFB8fh+FCigwjRbhEtAa5BY0U+BgDj/tJaiBP4UHC2657
+ax0b26HKy4zIFUnB8+Q0IS7w2iqO9GR1jbfzrucCgYEAq6WLxp0NpQqq8sL0tzvU
+7dDE6Ggc/jWp22dkFBLp3r5qSCKBsR5mApg+cSJ3Waaqfa5eSPI6CMVqfkylecNv
+irjOj3v3Y+PvuFtijehPcNjjq2KtndflCFoTek125QF9nxn6qjJ5vSzGPQ7xtDwp
+foQ1rIjhiAWC/KtO7246/fECgYEArRoygKqHPqjbnenUE+sJElrFIzQWmuehFHJE
+zFKFHHR8O+CwginsS72GW1LlKPzCNvscjBK6yrwFYvqw+3r6toxbSvDHSk6Xq1RJ
+cU7QNF+LkGuZPZ9TrO+l01cmoYKlQTNI/EldIgj+Pl/sIgGJ+dP58xKmPINkunmU
+pZebDGcCgYAnzV43h7LO/XslPvkjg7azJ8FCCkzXuHWWKSfHDM3StD+MBGPhIiwq
+ekIvHnT/RT7V3WLRryPwYx95vmDbdKEqQkvF8oQQ+OkYsMZ0pbLRz0SmilAm9DkO
+nBVZ9rhRq8OPeKaQnvzueINQ5pT+xxXYGwaxCkPkj6/FTluON5/mJg==
+-----END RSA PRIVATE KEY-----"
+
+echo "✅ Kalshi credentials set (KALSHI_ACCESS_KEY and KALSHI_PRIVATE_KEY)"
+echo "Now run: export \$(grep -v '^#' .env.local | xargs) && python3 scripts/kalshi_ws_worker.py"
+

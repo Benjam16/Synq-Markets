@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="80" fill="#2563EB"/>
+  <!-- Perspective rectangle outline -->
+  <path d="M120 105 L375 145 L400 370 L120 410 Z" stroke="white" stroke-width="32" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- Crossing diagonals (bowtie) -->
+  <line x1="120" y1="105" x2="400" y2="370" stroke="white" stroke-width="32" stroke-linecap="round"/>
+  <line x1="120" y1="410" x2="375" y2="145" stroke="white" stroke-width="32" stroke-linecap="round"/>
+</svg>
