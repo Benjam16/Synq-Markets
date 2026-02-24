@@ -104,9 +104,20 @@ async function ensureMarketInfoMap(): Promise<void> {
           if (seriesTicker) m.set(seriesTicker.toLowerCase(), info);
 
           // Index by EACH nested market ticker (what the trades API returns)
-          // e.g. "KXATPCHALLENGERMATCH-26FEB24SIMLEO-SIM"
+          // Use market-specific title so the terminal shows the specific bet,
+          // e.g. "Leonardo DiCaprio – Oscars 2026: Best Actor Winner"
           for (const mkt of (event.markets || [])) {
-            if (mkt.ticker) m.set(mkt.ticker.toLowerCase(), info);
+            if (mkt.ticker) {
+              const mktTitle = mkt.title || mkt.subtitle || '';
+              // If the market has its own distinct title, combine it with the event title
+              const specificName = (mktTitle && mktTitle.toLowerCase() !== title.toLowerCase())
+                ? `${mktTitle} – ${title}`
+                : title;
+              m.set(mkt.ticker.toLowerCase(), {
+                ...info,
+                name: specificName,
+              });
+            }
           }
         }
 
@@ -143,9 +154,18 @@ async function ensureMarketInfoMap(): Promise<void> {
         if (event.id) m.set(event.id.toString().toLowerCase(), info);
         if (event.slug) m.set(event.slug.toLowerCase(), info);
         // Index by each market's condition_id (what the CLOB trades API returns)
+        // Use market-specific question so the terminal shows the specific bet,
+        // e.g. "Will Leonardo DiCaprio win Best Actor at the Oscars 2026?"
         for (const mkt of (event.markets || [])) {
-          if (mkt.conditionId) m.set(mkt.conditionId.toLowerCase(), info);
-          if (mkt.id) m.set(mkt.id.toString().toLowerCase(), info);
+          const mktQuestion = mkt.question || '';
+          const specificName = mktQuestion || name;
+          const mktInfo: MarketInfo = {
+            ...info,
+            name: specificName,
+            imageUrl: mkt.image || event.image || event.icon || '',
+          };
+          if (mkt.conditionId) m.set(mkt.conditionId.toLowerCase(), mktInfo);
+          if (mkt.id) m.set(mkt.id.toString().toLowerCase(), mktInfo);
         }
         polyCount++;
       }
@@ -409,8 +429,8 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
               id: `poly-${baseTs}-${_polyEventOffset}-${eIdx}-${mIdx}`,
               provider: 'Polymarket' as const,
               type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
-              marketId: m.id || event.id || `poly-${eIdx}`,
-              marketName: event.title || m.question || 'Unknown',
+              marketId: m.conditionId || m.id || event.id || `poly-${eIdx}`,
+              marketName: m.question || event.title || 'Unknown',
               side: Math.random() > 0.4 ? 'Yes' as const : 'No' as const,
               price,
               priceCents: `${(price * 100).toFixed(1)}¢`,

@@ -77,6 +77,9 @@ export default function ChartModal({
 }: ChartModalProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<any>(null);
+  const maSeriesRef = useRef<any>(null);
+  const initialPriceRef = useRef(trade.price);
   const [tradeSide, setTradeSide] = useState<'yes' | 'no'>('yes');
   const [tradeQuantity, setTradeQuantity] = useState(100);
   const [activeTab, setActiveTab] = useState<'chart' | 'book' | 'trades'>('chart');
@@ -94,7 +97,18 @@ export default function ChartModal({
       .slice(0, 100);
   }, [allTrades, trade.marketName, trade.marketId]);
 
-  // Generate STABLE candlestick data using seeded random (won't change on re-renders)
+  // Stable key so candlestickData only recomputes when trade IDs actually change
+  const marketTradesKey = useMemo(() =>
+    marketTrades.map(t => t.id).join(','),
+    [marketTrades]
+  );
+
+  // Lock in the initial price when the chart first opens so synthetic data doesn't jump
+  useEffect(() => {
+    initialPriceRef.current = trade.price;
+  }, [trade.marketId]); // only reset when switching to a different market
+
+  // Generate STABLE candlestick data (only recomputes when trade IDs or timeRange change)
   const candlestickData = useMemo(() => {
     const sorted = [...marketTrades].reverse();
     const now = Date.now();
@@ -109,15 +123,19 @@ export default function ChartModal({
     };
     const cfg = rangeConfig[timeRange];
 
-    if (sorted.length < 2) {
-      // Generate deterministic synthetic candles using seeded random
+    // Use synthetic candles unless we have enough real trades for meaningful candles
+    if (sorted.length < 5) {
+      // Deterministic synthetic candles — seed by marketId + timeRange (never changes)
       const seed = trade.marketId
         ? trade.marketId.split('').reduce((s, c) => s + c.charCodeAt(0), 0) + timeRange.charCodeAt(0)
         : 42 + timeRange.charCodeAt(0);
       const rng = seededRandom(seed);
 
       const candles: { time: number; open: number; high: number; low: number; close: number }[] = [];
-      let p = trade.price * 100;
+      // Use the locked-in initial price so the chart doesn't jump on live price changes
+      let p = initialPriceRef.current * 100;
+      // Round 'now' to nearest interval so timestamps don't shift every second
+      const anchoredNow = Math.floor(now / cfg.intervalMs) * cfg.intervalMs;
       for (let i = cfg.candles; i >= 0; i--) {
         const open = p;
         const movement = (rng() - 0.48) * 3;
@@ -126,16 +144,12 @@ export default function ChartModal({
         const high = Math.max(open, close) + rng() * 1.5;
         const low = Math.min(open, close) - rng() * 1.5;
         candles.push({
-          time: Math.floor((now - i * cfg.intervalMs) / 1000),
+          time: Math.floor((anchoredNow - i * cfg.intervalMs) / 1000),
           open: Math.round(open * 10) / 10,
           high: Math.round(Math.min(99, high) * 10) / 10,
           low: Math.round(Math.max(1, low) * 10) / 10,
           close: Math.round(close * 10) / 10,
         });
-      }
-      // Last candle closes at current price
-      if (candles.length > 0) {
-        candles[candles.length - 1].close = Math.round(trade.price * 1000) / 10;
       }
       return candles;
     }
@@ -161,7 +175,8 @@ export default function ChartModal({
         high: Math.max(...prices),
         low: Math.min(...prices),
       }));
-  }, [marketTrades, trade.price, trade.marketId, timeRange]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marketTradesKey, trade.marketId, timeRange]);
 
   // Fetch REAL order book data
   const [orderBook, setOrderBook] = useState<{ bids: OrderBookEntry[]; asks: OrderBookEntry[] }>({ bids: [], asks: [] });
@@ -240,18 +255,16 @@ export default function ChartModal({
     }
 
     fetchOrderBook();
-    const interval = setInterval(fetchOrderBook, 8000);
+    const interval = setInterval(fetchOrderBook, 5000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [isOpen, trade.provider, trade.marketId, trade.price]);
 
-  // Initialize lightweight-charts — CANDLESTICK
+  // Create chart ONCE when modal opens — never destroyed/recreated on data changes
   useEffect(() => {
     if (!isOpen || activeTab !== 'chart' || !chartContainerRef.current) return;
 
-    if (chartRef.current) {
-      chartRef.current.remove();
-      chartRef.current = null;
-    }
+    // If chart already exists, skip creation
+    if (chartRef.current) return;
 
     const container = chartContainerRef.current;
     const chart = createChart(container, {
@@ -289,35 +302,18 @@ export default function ChartModal({
       wickDownColor: '#ef4444',
       wickUpColor: '#4FFFC8',
     });
+    candleSeriesRef.current = candleSeries;
 
-    // Deduplicate timestamps
-    const uniqueCandles = new Map<number, any>();
-    for (const c of candlestickData) {
-      uniqueCandles.set(c.time, c);
-    }
-    const sorted = Array.from(uniqueCandles.values()).sort((a, b) => a.time - b.time);
-    if (sorted.length > 0) {
-      candleSeries.setData(sorted);
-    }
+    // Moving average line (always created, data set later)
+    const maLine = chart.addSeries(LineSeries, {
+      color: 'rgba(123, 97, 255, 0.5)',
+      lineWidth: 1,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    maSeriesRef.current = maLine;
 
-    // Moving average line
-    if (sorted.length >= 5) {
-      const maLine = chart.addSeries(LineSeries, {
-        color: 'rgba(123, 97, 255, 0.5)',
-        lineWidth: 1,
-        crosshairMarkerVisible: false,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      const maData = sorted.map((c, i) => {
-        if (i < 4) return null;
-        const avg = sorted.slice(i - 4, i + 1).reduce((s, x) => s + x.close, 0) / 5;
-        return { time: c.time, value: Math.round(avg * 10) / 10 };
-      }).filter(Boolean) as any[];
-      maLine.setData(maData);
-    }
-
-    chart.timeScale().fitContent();
     chartRef.current = chart;
 
     const handleResize = () => {
@@ -333,8 +329,38 @@ export default function ChartModal({
         chartRef.current.remove();
         chartRef.current = null;
       }
+      candleSeriesRef.current = null;
+      maSeriesRef.current = null;
     };
-  }, [isOpen, activeTab, candlestickData]);
+  }, [isOpen, activeTab]);
+
+  // Update chart DATA when candlestickData changes — no chart recreation
+  useEffect(() => {
+    if (!candleSeriesRef.current || !chartRef.current || candlestickData.length === 0) return;
+
+    // Deduplicate timestamps
+    const uniqueCandles = new Map<number, any>();
+    for (const c of candlestickData) uniqueCandles.set(c.time, c);
+    const sorted = Array.from(uniqueCandles.values()).sort((a: any, b: any) => a.time - b.time);
+
+    candleSeriesRef.current.setData(sorted);
+
+    // Update moving average
+    if (maSeriesRef.current) {
+      if (sorted.length >= 5) {
+        const maData = sorted.map((c: any, i: number) => {
+          if (i < 4) return null;
+          const avg = sorted.slice(i - 4, i + 1).reduce((s: number, x: any) => s + x.close, 0) / 5;
+          return { time: c.time, value: Math.round(avg * 10) / 10 };
+        }).filter(Boolean) as any[];
+        maSeriesRef.current.setData(maData);
+      } else {
+        maSeriesRef.current.setData([]);
+      }
+    }
+
+    chartRef.current.timeScale().fitContent();
+  }, [candlestickData]);
 
   const yesPrice = trade.price * 100;
   const noPrice = (1 - trade.price) * 100;
