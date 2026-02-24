@@ -33,6 +33,8 @@ import {
   X,
   Settings,
   Info,
+  SlidersHorizontal,
+  Filter,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -210,6 +212,16 @@ export default function TerminalPage() {
   const [scannerCategory, setScannerCategory] = useState('All');
   const [scannerSearch, setScannerSearch] = useState('');
   const [liveSubTab, setLiveSubTab] = useState<'all' | 'orders' | 'fills'>('all');
+  // ── Advanced Filters ──
+  const [filterProvider, setFilterProvider] = useState<'all' | 'Polymarket' | 'Kalshi'>('all');
+  const [filterSide, setFilterSide] = useState<'all' | 'Yes' | 'No'>('all');
+  const [filterMinNotional, setFilterMinNotional] = useState<number>(0);
+  const [filterPriceRange, setFilterPriceRange] = useState<'all' | '0-25' | '25-50' | '50-75' | '75-100'>('all');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [filterWhaleOnly, setFilterWhaleOnly] = useState(false);
+  const [filterSearch, setFilterSearch] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const filtersRef = useRef<HTMLDivElement>(null);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
   const [quickTradeMarket, setQuickTradeMarket] = useState<Market | null>(null);
   const [isQuickTradeOpen, setIsQuickTradeOpen] = useState(false);
@@ -257,17 +269,20 @@ export default function TerminalPage() {
     try { localStorage.setItem('terminal-tutorial-seen', '1'); } catch {}
   }, []);
 
-  // ── Close instant settings on click outside ──
+  // ── Close dropdowns on click outside ──
   useEffect(() => {
-    if (!showInstantSettings) return;
+    if (!showInstantSettings && !showFilters) return;
     const handler = (e: MouseEvent) => {
-      if (instantSettingsRef.current && !instantSettingsRef.current.contains(e.target as Node)) {
+      if (showInstantSettings && instantSettingsRef.current && !instantSettingsRef.current.contains(e.target as Node)) {
         setShowInstantSettings(false);
+      }
+      if (showFilters && filtersRef.current && !filtersRef.current.contains(e.target as Node)) {
+        setShowFilters(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [showInstantSettings]);
+  }, [showInstantSettings, showFilters]);
 
   // ── Sound Effect ──
   useEffect(() => {
@@ -533,7 +548,7 @@ export default function TerminalPage() {
     };
 
     poll(); // Immediate fetch on mount
-    const interval = setInterval(poll, 2000);
+    const interval = setInterval(poll, 1500); // 1.5s for snappier feel
 
     return () => {
       mounted = false;
@@ -580,12 +595,62 @@ export default function TerminalPage() {
 
   const categories = useMemo(() => ['All', ...Array.from(new Set(marketTicks.map(t => t.category)))], [marketTicks]);
 
-  // ── Filtered live trades ──
+  // ── Filtered live trades (advanced) ──
   const filteredTrades = useMemo(() => trades.filter(t => {
+    // Sub-tab filter
     if (liveSubTab === 'orders' && t.type !== 'ORDER') return false;
     if (liveSubTab === 'fills' && t.type !== 'FILL' && t.type !== 'BUY' && t.type !== 'SELL') return false;
+    // Provider filter
+    if (filterProvider !== 'all' && t.provider !== filterProvider) return false;
+    // Side filter
+    if (filterSide !== 'all') {
+      const tradeSide = t.side === 'Yes' || t.side === 'Up' ? 'Yes' : 'No';
+      if (filterSide !== tradeSide) return false;
+    }
+    // Min notional
+    if (filterMinNotional > 0 && t.notional < filterMinNotional) return false;
+    // Price range (in cents)
+    if (filterPriceRange !== 'all') {
+      const cents = t.price * 100;
+      if (filterPriceRange === '0-25' && (cents < 0 || cents > 25)) return false;
+      if (filterPriceRange === '25-50' && (cents < 25 || cents > 50)) return false;
+      if (filterPriceRange === '50-75' && (cents < 50 || cents > 75)) return false;
+      if (filterPriceRange === '75-100' && (cents < 75 || cents > 100)) return false;
+    }
+    // Category
+    if (filterCategory !== 'all' && t.category && t.category.toLowerCase() !== filterCategory.toLowerCase()) return false;
+    // Whale only
+    if (filterWhaleOnly && !t.isWhale) return false;
+    // Search
+    if (filterSearch) {
+      const q = filterSearch.toLowerCase();
+      if (!t.marketName.toLowerCase().includes(q) && !t.marketId.toLowerCase().includes(q)) return false;
+    }
     return true;
-  }), [trades, liveSubTab]);
+  }), [trades, liveSubTab, filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch]);
+
+  // Count active filters for badge
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filterProvider !== 'all') count++;
+    if (filterSide !== 'all') count++;
+    if (filterMinNotional > 0) count++;
+    if (filterPriceRange !== 'all') count++;
+    if (filterCategory !== 'all') count++;
+    if (filterWhaleOnly) count++;
+    if (filterSearch) count++;
+    return count;
+  }, [filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch]);
+
+  const clearAllFilters = useCallback(() => {
+    setFilterProvider('all');
+    setFilterSide('all');
+    setFilterMinNotional(0);
+    setFilterPriceRange('all');
+    setFilterCategory('all');
+    setFilterWhaleOnly(false);
+    setFilterSearch('');
+  }, []);
 
   // ── Activity Heatmap (last 60 seconds) ──
   const heatmapDots = useMemo(() => Array.from({ length: 60 }, (_, i) => {
@@ -1011,25 +1076,226 @@ export default function TerminalPage() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
-              {/* Sub-tabs */}
-              <div className="flex items-center gap-2 mb-6">
-                {(['all', 'orders', 'fills'] as const).map((sub) => (
+              {/* Sub-tabs + Filter Bar */}
+              <div className="flex flex-col gap-3 mb-4">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Sub-tab pills */}
+                  {(['all', 'orders', 'fills'] as const).map((sub) => (
+                    <button
+                      key={sub}
+                      onClick={() => setLiveSubTab(sub)}
+                      className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
+                        liveSubTab === sub
+                          ? 'bg-[#4FFFC8]/15 text-[#4FFFC8] border border-[#4FFFC8]/30'
+                          : 'text-slate-500 hover:text-white'
+                      }`}
+                    >
+                      {sub === 'all' ? 'All' : sub === 'orders' ? 'Orders' : 'Activity'}
+                    </button>
+                  ))}
+
+                  {/* Divider */}
+                  <div className="w-px h-5 bg-[#1A1A1A] mx-1" />
+
+                  {/* Quick filters inline */}
                   <button
-                    key={sub}
-                    onClick={() => setLiveSubTab(sub)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
-                      liveSubTab === sub
-                        ? 'bg-[#4FFFC8]/15 text-[#4FFFC8] border border-[#4FFFC8]/30'
-                        : 'text-slate-500 hover:text-white'
+                    onClick={() => setFilterProvider(filterProvider === 'Polymarket' ? 'all' : 'Polymarket')}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterProvider === 'Polymarket'
+                        ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    {sub === 'all' ? 'All' : sub === 'orders' ? 'Orders' : 'Activity'}
+                    POLY
                   </button>
-                ))}
-                <div className="flex-1" />
-                <span className="text-xs text-slate-500">
-                  Server-side stream · <span className="text-white">{filteredTrades.length}</span> trades
-                </span>
+                  <button
+                    onClick={() => setFilterProvider(filterProvider === 'Kalshi' ? 'all' : 'Kalshi')}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterProvider === 'Kalshi'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    KALSHI
+                  </button>
+
+                  <div className="w-px h-5 bg-[#1A1A1A] mx-1" />
+
+                  <button
+                    onClick={() => setFilterSide(filterSide === 'Yes' ? 'all' : 'Yes')}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterSide === 'Yes'
+                        ? 'bg-[#4FFFC8]/20 text-[#4FFFC8] border border-[#4FFFC8]/30'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    YES
+                  </button>
+                  <button
+                    onClick={() => setFilterSide(filterSide === 'No' ? 'all' : 'No')}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterSide === 'No'
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    NO
+                  </button>
+
+                  <div className="w-px h-5 bg-[#1A1A1A] mx-1" />
+
+                  <button
+                    onClick={() => setFilterWhaleOnly(!filterWhaleOnly)}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterWhaleOnly
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    🐋 WHALES
+                  </button>
+
+                  {/* Advanced filters toggle */}
+                  <div className="relative" ref={filtersRef}>
+                    <button
+                      onClick={() => setShowFilters(!showFilters)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${
+                        showFilters || activeFilterCount > 0
+                          ? 'border-[#7B61FF]/50 bg-[#7B61FF]/10 text-[#7B61FF]'
+                          : 'border-transparent text-slate-500 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <SlidersHorizontal className="w-3 h-3" />
+                      FILTERS
+                      {activeFilterCount > 0 && (
+                        <span className="w-4 h-4 rounded-full bg-[#7B61FF] text-white text-[8px] flex items-center justify-center">
+                          {activeFilterCount}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Advanced Filters Dropdown */}
+                    <AnimatePresence>
+                      {showFilters && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -5 }}
+                          className="absolute top-full right-0 mt-2 w-80 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl p-4 z-50 shadow-2xl"
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                              Advanced Filters
+                            </h4>
+                            {activeFilterCount > 0 && (
+                              <button
+                                onClick={clearAllFilters}
+                                className="text-[10px] text-[#7B61FF] hover:text-white transition-colors"
+                              >
+                                Clear all
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Search */}
+                          <div className="mb-3">
+                            <label className="text-[9px] text-slate-500 uppercase tracking-wider mb-1 block">Search Market</label>
+                            <input
+                              type="text"
+                              value={filterSearch}
+                              onChange={(e) => setFilterSearch(e.target.value)}
+                              placeholder="e.g. Bitcoin, Trump..."
+                              className="w-full bg-white/[0.03] border border-[#1A1A1A] rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-[#7B61FF]/40 placeholder:text-slate-600"
+                            />
+                          </div>
+
+                          {/* Price Range */}
+                          <div className="mb-3">
+                            <label className="text-[9px] text-slate-500 uppercase tracking-wider mb-1.5 block">Price Range</label>
+                            <div className="flex gap-1.5 flex-wrap">
+                              {[
+                                { v: 'all' as const, label: 'Any' },
+                                { v: '0-25' as const, label: '0–25¢' },
+                                { v: '25-50' as const, label: '25–50¢' },
+                                { v: '50-75' as const, label: '50–75¢' },
+                                { v: '75-100' as const, label: '75–100¢' },
+                              ].map(({ v, label }) => (
+                                <button
+                                  key={v}
+                                  onClick={() => setFilterPriceRange(v)}
+                                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                                    filterPriceRange === v
+                                      ? 'bg-[#7B61FF]/20 text-[#7B61FF] border border-[#7B61FF]/30'
+                                      : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Min Trade Size */}
+                          <div className="mb-3">
+                            <label className="text-[9px] text-slate-500 uppercase tracking-wider mb-1.5 block">Min Trade Size</label>
+                            <div className="flex gap-1.5 flex-wrap">
+                              {[
+                                { v: 0, label: 'Any' },
+                                { v: 10, label: '$10+' },
+                                { v: 50, label: '$50+' },
+                                { v: 100, label: '$100+' },
+                                { v: 500, label: '$500+' },
+                                { v: 1000, label: '$1K+' },
+                                { v: 5000, label: '$5K+' },
+                              ].map(({ v, label }) => (
+                                <button
+                                  key={v}
+                                  onClick={() => setFilterMinNotional(v)}
+                                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                                    filterMinNotional === v
+                                      ? 'bg-[#7B61FF]/20 text-[#7B61FF] border border-[#7B61FF]/30'
+                                      : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Category */}
+                          <div className="mb-1">
+                            <label className="text-[9px] text-slate-500 uppercase tracking-wider mb-1.5 block">Category</label>
+                            <div className="flex gap-1.5 flex-wrap">
+                              {['all', 'Crypto', 'Politics', 'Sports', 'Finance', 'Tech', 'Culture'].map((cat) => (
+                                <button
+                                  key={cat}
+                                  onClick={() => setFilterCategory(cat)}
+                                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                                    filterCategory === cat
+                                      ? 'bg-[#7B61FF]/20 text-[#7B61FF] border border-[#7B61FF]/30'
+                                      : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'
+                                  }`}
+                                >
+                                  {cat === 'all' ? 'All' : cat}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  <div className="flex-1" />
+
+                  {/* Trade count */}
+                  <span className="text-xs text-slate-500">
+                    <span className="text-white font-mono">{filteredTrades.length}</span>
+                    {activeFilterCount > 0 && <span className="text-slate-600">/{trades.length}</span>}
+                    {' '}trades
+                  </span>
+                </div>
               </div>
 
               {/* Trade Feed */}

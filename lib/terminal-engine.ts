@@ -22,6 +22,7 @@ interface MarketInfo {
   name: string;
   externalUrl: string;
   category: string;
+  imageUrl?: string;
 }
 
 let _marketInfoMap: Map<string, MarketInfo> = new Map();
@@ -82,10 +83,19 @@ async function ensureMarketInfoMap(): Promise<void> {
           const kalshiSlug = seriesTicker
             ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
             : eventTicker.toLowerCase();
+          // Build image URL
+          let kalshiImg = '';
+          if (seriesTicker) {
+            kalshiImg = `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`;
+          } else if (eventTicker) {
+            const tickerPrefix = eventTicker.split('-')[0];
+            if (tickerPrefix) kalshiImg = `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${tickerPrefix}.webp`;
+          }
           const info: MarketInfo = {
             name: title,
             externalUrl: `https://kalshi.com/markets/${kalshiSlug}`,
             category: event.category || 'General',
+            imageUrl: kalshiImg,
           };
 
           // Index by event ticker (e.g. "kxatpchallengermatch")
@@ -128,6 +138,7 @@ async function ensureMarketInfoMap(): Promise<void> {
           name,
           externalUrl: event.slug ? `https://polymarket.com/event/${event.slug}` : 'https://polymarket.com',
           category: 'General',
+          imageUrl: event.image || event.icon || '',
         };
         if (event.id) m.set(event.id.toString().toLowerCase(), info);
         if (event.slug) m.set(event.slug.toLowerCase(), info);
@@ -294,7 +305,7 @@ const ARB_THRESHOLD = 0.03;                  // 3% spread minimum
 const TRADE_CACHE_MAX = 500;                 // Keep last 500 trades
 const WHALE_CACHE_MAX = 50;                  // Keep last 50 whale alerts
 const MARKET_TICK_MAX = 200;                 // Keep last 200 market ticks
-const CACHE_TTL = 5000;                      // 5 second cache TTL
+const CACHE_TTL = 3000;                      // 3 second cache TTL (faster refresh)
 const POLYMARKET_CLOB_BASE = 'https://clob.polymarket.com';
 const KALSHI_API_BASE = 'https://api.elections.kalshi.com';
 

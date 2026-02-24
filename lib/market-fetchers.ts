@@ -1127,6 +1127,18 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
 
             const kalshiUrl = `https://kalshi.com/markets/${kalshiSlug}`;
 
+            // Build image URL — try series ticker, then event ticker prefix, then category-based
+            let kalshiImageUrl = '';
+            if (seriesTicker) {
+              kalshiImageUrl = `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`;
+            } else if (eventTicker) {
+              // Try event ticker prefix (e.g., KXBTC from KXBTC-26FEB25)
+              const tickerPrefix = eventTicker.split('-')[0];
+              if (tickerPrefix) {
+                kalshiImageUrl = `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${tickerPrefix}.webp`;
+              }
+            }
+
             unified.push({
               id: `kalshi-${eventTicker}`,
               conditionId: eventTicker,
@@ -1136,9 +1148,7 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
               description: rules || subTitle || '',
               price: primaryPrice,
               outcomes,
-              imageUrl: seriesTicker
-                ? `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`
-                : '', // Fallback to green "K" icon
+              imageUrl: kalshiImageUrl,
               polymarketUrl: kalshiUrl, // Used by existing link handlers
               kalshiUrl,
               slug: eventTicker.toLowerCase(),
