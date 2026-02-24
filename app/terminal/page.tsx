@@ -536,16 +536,12 @@ export default function TerminalPage() {
         }
 
         if (matched.length > 0) {
-          // Group by eventTitle — show all markets for this event
-          const eventTitle = matched[0].eventTitle || matched[0].name;
-          const eventMarkets = (markets as Market[]).filter((m: Market) =>
-            m.eventTitle === eventTitle
-          );
-          const finalMarkets = eventMarkets.length > 0 ? eventMarkets : matched;
-
-          setQuickTradeMarket(finalMarkets[0]);
-          setQuickTradeEventMarkets(finalMarkets);
-          setQuickTradeEventTitle(eventTitle || trade.marketName);
+          // Use ONLY the single best-matched market — not the entire event
+          // The market's own outcomes[] array already has Yes/No or multi-choice options
+          const bestMatch = matched[0];
+          setQuickTradeMarket(bestMatch);
+          setQuickTradeEventMarkets([bestMatch]);
+          setQuickTradeEventTitle(bestMatch.eventTitle || bestMatch.name || trade.marketName);
         }
       }
     } catch (err) {
