@@ -79,11 +79,15 @@ export interface TerminalTrade {
   timestamp: string;   // ISO string
   walletAddress?: string;
   isWhale: boolean;
+  externalUrl?: string;  // Direct link to Polymarket/Kalshi market page
+  slug?: string;         // Market slug for URL construction
+  category?: string;     // Market category
 }
 
 export interface WhaleAlert {
   id: string;
   provider: 'Polymarket' | 'Kalshi';
+  marketId: string;
   marketName: string;
   side: 'Yes' | 'No';
   notional: number;
@@ -91,6 +95,7 @@ export interface WhaleAlert {
   shares: number;
   walletAddress?: string;
   timestamp: string;
+  externalUrl?: string;
 }
 
 export interface ArbitrageSignal {
@@ -203,11 +208,15 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
             const vol = parseFloat(m.volume || '0');
             const shares = Math.floor(Math.random() * 100) + 1;
             const notional = price * shares;
+            const eventSlug = event.slug || '';
+            const externalUrl = eventSlug
+              ? `https://polymarket.com/event/${eventSlug}`
+              : `https://polymarket.com`;
 
             return {
               id: `poly-${baseTs}-${eIdx}-${mIdx}`,
               provider: 'Polymarket' as const,
-              type: 'BUY' as const,
+              type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
               marketId: m.id || event.id || `poly-${eIdx}`,
               marketName: event.title || m.question || 'Unknown',
               side: Math.random() > 0.4 ? 'Yes' as const : 'No' as const,
@@ -216,9 +225,12 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
               shares,
               notional,
               fee: Math.round(notional * 0.02 * 100) / 100,
-              timestamp: new Date(baseTs - (eIdx * 2 + mIdx) * 29).toISOString(), // stagger for interleaving
+              timestamp: new Date(baseTs - (eIdx * 2 + mIdx) * 29).toISOString(),
               walletAddress: `0x${Math.random().toString(16).slice(2, 6)}...${Math.random().toString(16).slice(2, 6)}`,
               isWhale: notional >= WHALE_THRESHOLD,
+              externalUrl,
+              slug: eventSlug,
+              category: event.category || '',
             };
           });
         });
@@ -237,11 +249,15 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
       const shares = parseInt(t.size || t.amount || t.count || '10');
       const notional = price * shares;
       const side = (t.side || t.outcome || 'Yes').toLowerCase();
+      const tradeSlug = t.market_slug || '';
+      const externalUrl = tradeSlug
+        ? `https://polymarket.com/event/${tradeSlug}`
+        : `https://polymarket.com`;
 
       return {
         id: `poly-${t.id || `${Date.now()}-${idx}`}`,
         provider: 'Polymarket' as const,
-        type: (t.type || 'BUY').toUpperCase() as TerminalTrade['type'],
+        type: (t.type || 'FILL').toUpperCase() as TerminalTrade['type'],
         marketId: t.market || t.asset_id || t.condition_id || `poly-${idx}`,
         marketName: t.market_slug || t.title || t.question || `Market ${t.market?.slice(0, 8) || idx}`,
         side: side.includes('yes') || side.includes('up') ? 'Yes' : 'No',
@@ -253,6 +269,8 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         timestamp: t.created_at || t.timestamp || new Date().toISOString(),
         walletAddress: t.maker_address || t.taker_address || t.owner,
         isWhale: notional >= WHALE_THRESHOLD,
+        externalUrl,
+        slug: tradeSlug,
       };
     });
   } catch (err) {
@@ -319,11 +337,17 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           const shares = Math.floor(Math.random() * 50) + 5;
           const notional = price * shares;
 
+          const kalshiTicker = m.ticker || event.event_ticker || '';
+          const kalshiSeries = event.series_ticker || kalshiTicker.split('-')[0] || '';
+          const kalshiExternalUrl = kalshiSeries
+            ? `https://kalshi.com/markets/${kalshiSeries.toLowerCase()}/${kalshiTicker.toLowerCase()}`
+            : `https://kalshi.com/markets/${kalshiTicker.toLowerCase()}`;
+
           return [{
             id: `kalshi-${baseTs}-${eIdx}`,
             provider: 'Kalshi' as const,
-            type: 'ORDER' as const,
-            marketId: m.ticker || event.event_ticker,
+            type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
+            marketId: kalshiTicker,
             marketName: event.title || m.title || 'Unknown Kalshi Market',
             side: Math.random() > 0.5 ? 'Yes' as const : 'No' as const,
             price,
@@ -331,8 +355,10 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
             shares,
             notional,
             fee: Math.round(notional * 0.07 * 100) / 100,
-            timestamp: new Date(baseTs - eIdx * 31).toISOString(), // stagger timestamps for interleaving
+            timestamp: new Date(baseTs - eIdx * 31).toISOString(),
             isWhale: notional >= WHALE_THRESHOLD,
+            externalUrl: kalshiExternalUrl,
+            category: event.category || '',
           }];
         });
       }
@@ -354,11 +380,15 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
       const notional = price * shares;
       const ticker = t.ticker || t.market_ticker || '';
       const resolvedName = resolveMarketName(ticker, t.market_title || t.title || ticker || `Kalshi Trade`);
+      const kalshiPrefix = ticker.split('-')[0] || '';
+      const kalshiExternalUrl = kalshiPrefix
+        ? `https://kalshi.com/markets/${kalshiPrefix.toLowerCase()}/${ticker.toLowerCase()}`
+        : `https://kalshi.com/markets/${ticker.toLowerCase()}`;
 
       return {
         id: `kalshi-${t.trade_id || `${Date.now()}-${idx}`}`,
         provider: 'Kalshi' as const,
-        type: (t.action || 'ORDER').toUpperCase() as TerminalTrade['type'],
+        type: (t.action || 'FILL').toUpperCase() as TerminalTrade['type'],
         marketId: ticker || `kalshi-${idx}`,
         marketName: resolvedName,
         side: (t.side || 'yes').toLowerCase() === 'yes' ? 'Yes' : 'No',
@@ -369,6 +399,7 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
         fee: parseFloat(t.fee || '0') || Math.round(notional * 0.07 * 100) / 100,
         timestamp: t.created_time || t.executed_at || new Date().toISOString(),
         isWhale: notional >= WHALE_THRESHOLD,
+        externalUrl: kalshiExternalUrl,
       };
     });
   } catch (err) {
@@ -388,6 +419,7 @@ function detectWhales(trades: TerminalTrade[]): WhaleAlert[] {
     .map(t => ({
       id: `whale-${t.id}`,
       provider: t.provider,
+      marketId: t.marketId,
       marketName: t.marketName,
       side: t.side === 'Yes' || t.side === 'Up' ? 'Yes' as const : 'No' as const,
       notional: t.notional,
@@ -395,6 +427,7 @@ function detectWhales(trades: TerminalTrade[]): WhaleAlert[] {
       shares: t.shares,
       walletAddress: t.walletAddress,
       timestamp: t.timestamp,
+      externalUrl: t.externalUrl,
     }));
 }
 

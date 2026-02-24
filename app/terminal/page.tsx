@@ -54,11 +54,15 @@ interface TerminalTrade {
   timestamp: string;
   walletAddress?: string;
   isWhale: boolean;
+  externalUrl?: string;
+  slug?: string;
+  category?: string;
 }
 
 interface WhaleAlert {
   id: string;
   provider: 'Polymarket' | 'Kalshi';
+  marketId: string;
   marketName: string;
   side: 'Yes' | 'No';
   notional: number;
@@ -66,6 +70,7 @@ interface WhaleAlert {
   shares: number;
   walletAddress?: string;
   timestamp: string;
+  externalUrl?: string;
 }
 
 interface ArbitrageSignal {
@@ -187,44 +192,42 @@ export default function TerminalPage() {
     });
   }, []);
 
-  // ── Open Quick Trade Panel ──
-  const quickTrade = useCallback(async (marketId: string, provider: string, marketName: string) => {
-    try {
-      const searchTerm = marketId && marketId !== 'unknown' ? marketId : marketName;
-      const res = await fetch(`/api/markets?limit=1&search=${encodeURIComponent(searchTerm)}`);
-      if (!res.ok) throw new Error('Failed to fetch market');
-      const data = await res.json();
-      const market = data.markets?.find((m: Market) => 
-        m.id === marketId || m.id.includes(marketId) || m.name === marketName || m.eventTitle === marketName
-      ) || data.markets?.[0]; // Fallback to first result
-      
-      if (market) {
-        setQuickTradeMarket(market);
-        setIsQuickTradeOpen(true);
-      }
-    } catch (err) {
-      console.error('Failed to load market for quick trade:', err);
-    }
+  // ── Build Market object from trade data ──
+  const buildMarketFromTrade = useCallback((trade: TerminalTrade | WhaleAlert, tradeProvider?: string): Market => {
+    const provider = (trade.provider || tradeProvider || 'Polymarket') as 'Polymarket' | 'Kalshi';
+    const price = trade.price;
+    return {
+      id: trade.marketId || 'unknown',
+      conditionId: trade.marketId || '',
+      provider,
+      name: trade.marketName,
+      eventTitle: trade.marketName,
+      price,
+      yesPrice: price,
+      noPrice: 1 - price,
+      imageUrl: '',
+      polymarketUrl: provider === 'Polymarket' ? ('externalUrl' in trade ? (trade as TerminalTrade).externalUrl || '' : '') : '',
+      kalshiUrl: provider === 'Kalshi' ? (trade.externalUrl || '') : '',
+      slug: ('slug' in trade ? (trade as TerminalTrade).slug : '') || '',
+      volume: trade.notional || 0,
+      volumeFormatted: formatUSD(trade.notional || 0),
+      category: ('category' in trade ? (trade as TerminalTrade).category : '') || 'General',
+      last_updated: trade.timestamp || new Date().toISOString(),
+    };
   }, []);
 
+  // ── Open Quick Trade Panel ──
+  const quickTrade = useCallback((trade: TerminalTrade | WhaleAlert) => {
+    const market = buildMarketFromTrade(trade);
+    setQuickTradeMarket(market);
+    setIsQuickTradeOpen(true);
+  }, [buildMarketFromTrade]);
+
   // ── Open Market Modal ──
-  const openMarketModal = useCallback(async (marketId: string, provider: string, marketName: string) => {
-    try {
-      const searchTerm = marketId && marketId !== 'unknown' ? marketId : marketName;
-      const res = await fetch(`/api/markets?limit=1&search=${encodeURIComponent(searchTerm)}`);
-      if (!res.ok) throw new Error('Failed to fetch market');
-      const data = await res.json();
-      const market = data.markets?.find((m: Market) => 
-        m.id === marketId || m.id.includes(marketId) || m.name === marketName || m.eventTitle === marketName
-      ) || data.markets?.[0]; // Fallback to first result
-      
-      if (market) {
-        setSelectedMarket(market);
-      }
-    } catch (err) {
-      console.error('Failed to load market:', err);
-    }
-  }, []);
+  const openMarketModal = useCallback((trade: TerminalTrade | WhaleAlert) => {
+    const market = buildMarketFromTrade(trade);
+    setSelectedMarket(market);
+  }, [buildMarketFromTrade]);
 
   // ── Data Polling (optimized: immediate fetch + 2s interval) ──
   const tradesRef = useRef<TerminalTrade[]>([]);
@@ -331,8 +334,8 @@ export default function TerminalPage() {
 
   // ── Filtered live trades ──
   const filteredTrades = trades.filter(t => {
-    if (liveSubTab === 'orders' && t.type !== 'ORDER' && t.type !== 'BUY' && t.type !== 'SELL') return false;
-    if (liveSubTab === 'fills' && t.type !== 'FILL' && t.type !== 'FEE_REFUND') return false;
+    if (liveSubTab === 'orders' && t.type !== 'ORDER') return false;
+    if (liveSubTab === 'fills' && t.type !== 'FILL' && t.type !== 'BUY' && t.type !== 'SELL') return false;
     return true;
   });
 
@@ -630,7 +633,7 @@ export default function TerminalPage() {
                       <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                         {/* Quick Trade Button */}
                         <button
-                          onClick={() => quickTrade(trade.marketId, trade.provider, trade.marketName)}
+                          onClick={() => quickTrade(trade)}
                           className="p-1.5 rounded-md hover:bg-[#4FFFC8]/20 transition-colors group relative"
                           title="Quick Trade"
                         >
@@ -650,23 +653,25 @@ export default function TerminalPage() {
                           )}
                         </button>
 
-                        {/* View Market Button */}
+                        {/* View Market Card */}
                         <button
-                          onClick={() => openMarketModal(trade.marketId, trade.provider, trade.marketName)}
+                          onClick={() => openMarketModal(trade)}
                           className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
                           title="View market card"
                         >
                           <Maximize2 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
                         </button>
 
-                        {/* Go to Market Link */}
-                        <Link
-                          href={`/markets?provider=${trade.provider.toLowerCase()}&search=${encodeURIComponent(trade.marketName.slice(0, 30))}`}
+                        {/* External Link to Official Market Page */}
+                        <a
+                          href={trade.externalUrl || (trade.provider === 'Kalshi' ? `https://kalshi.com/markets` : `https://polymarket.com`)}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
-                          title="Go to market page"
+                          title={`Open on ${trade.provider}`}
                         >
                           <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-[#4FFFC8]" />
-                        </Link>
+                        </a>
                       </div>
                     </motion.div>
                   ))
@@ -730,7 +735,7 @@ export default function TerminalPage() {
                         <div className="flex items-center gap-1">
                           {/* Quick Trade Button */}
                           <button
-                            onClick={() => quickTrade('', whale.provider, whale.marketName)}
+                            onClick={() => quickTrade(whale)}
                             className="p-1.5 rounded-md hover:bg-[#4FFFC8]/20 transition-colors group relative"
                             title="Quick Trade"
                           >
@@ -750,23 +755,25 @@ export default function TerminalPage() {
                             )}
                           </button>
 
-                          {/* View Market Button */}
+                          {/* View Market Card */}
                           <button
-                            onClick={() => openMarketModal('', whale.provider, whale.marketName)}
+                            onClick={() => openMarketModal(whale)}
                             className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
                             title="View market card"
                           >
                             <Maximize2 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
                           </button>
 
-                          {/* Go to Market Link */}
-                          <Link
-                            href={`/markets?provider=${whale.provider.toLowerCase()}&search=${encodeURIComponent(whale.marketName.slice(0, 30))}`}
+                          {/* External Link to Official Market Page */}
+                          <a
+                            href={whale.externalUrl || (whale.provider === 'Kalshi' ? `https://kalshi.com/markets` : `https://polymarket.com`)}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
-                            title="Go to market page"
+                            title={`Open on ${whale.provider}`}
                           >
                             <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-[#4FFFC8]" />
-                          </Link>
+                          </a>
                         </div>
                       </div>
                     </div>
@@ -1110,7 +1117,7 @@ export default function TerminalPage() {
 
               {/* Modal Content */}
               <div className="p-6">
-                <h3 className="text-xl font-bold text-white mb-4">{selectedMarket.name}</h3>
+                <h3 className="text-xl font-bold text-white mb-4">{selectedMarket.eventTitle || selectedMarket.name}</h3>
                 
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   <div className="p-4 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
@@ -1135,18 +1142,50 @@ export default function TerminalPage() {
 
                 {/* Action Buttons */}
                 <div className="flex items-center gap-3">
-                  <Link
-                    href={`/markets?provider=${selectedMarket.provider.toLowerCase()}&search=${encodeURIComponent(selectedMarket.name.slice(0, 30))}`}
+                  {/* Trade This Market — opens trade panel */}
+                  <button
+                    onClick={() => {
+                      setSelectedMarket(null);
+                      setQuickTradeMarket(selectedMarket);
+                      setIsQuickTradeOpen(true);
+                    }}
                     className="flex-1 py-3 rounded-xl bg-[#4FFFC8] text-black font-bold text-sm text-center hover:bg-[#3de6b3] transition-colors"
-                    onClick={() => setSelectedMarket(null)}
                   >
                     Trade This Market
+                  </button>
+
+                  {/* Open in Markets Tab */}
+                  <Link
+                    href={`/markets?search=${encodeURIComponent((selectedMarket.eventTitle || selectedMarket.name).slice(0, 40))}`}
+                    onClick={() => setSelectedMarket(null)}
+                    className="px-4 py-3 rounded-xl border border-[#1A1A1A] text-slate-400 hover:text-white hover:border-[#4FFFC8]/30 transition-colors"
+                    title="View in Markets"
+                  >
+                    <Search className="w-4 h-4" />
                   </Link>
+
+                  {/* External Link */}
+                  <a
+                    href={
+                      selectedMarket.provider === 'Kalshi'
+                        ? (selectedMarket.kalshiUrl || `https://kalshi.com/markets`)
+                        : (selectedMarket.polymarketUrl || `https://polymarket.com`)
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-3 rounded-xl border border-[#1A1A1A] text-slate-400 hover:text-white hover:border-[#4FFFC8]/30 transition-colors"
+                    title={`Open on ${selectedMarket.provider}`}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+
+                  {/* Copy */}
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(`${selectedMarket.name} - $${selectedMarket.price.toFixed(2)}`);
                     }}
                     className="px-4 py-3 rounded-xl border border-[#1A1A1A] text-slate-400 hover:text-white hover:border-[#4FFFC8]/30 transition-colors"
+                    title="Copy market info"
                   >
                     <Copy className="w-4 h-4" />
                   </button>
