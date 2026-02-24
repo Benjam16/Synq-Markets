@@ -729,6 +729,15 @@ export default function TerminalPage() {
         )}
       </button>
 
+      {/* 📊 CHART — opens TradingView-style chart modal */}
+      <button
+        onClick={() => openMarketModal(trade)}
+        className="p-1.5 rounded-md hover:bg-[#7B61FF]/20 transition-colors group"
+        title="Open chart & order book"
+      >
+        <BarChart3 className="w-3.5 h-3.5 text-[#7B61FF]/70 group-hover:text-[#7B61FF]" />
+      </button>
+
       {/* 🔲 EXPAND — opens full trade panel */}
       <button
         onClick={() => openTradePanel(trade)}

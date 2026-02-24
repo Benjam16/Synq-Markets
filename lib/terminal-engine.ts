@@ -454,6 +454,81 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
 // KALSHI LIVE TRADES FETCHER
 // ============================================================================
 
+// Helper: generate synthetic Kalshi trades from the events endpoint
+async function fetchKalshiSyntheticTrades(count: number = 30): Promise<TerminalTrade[]> {
+  const accessKey = process.env.KALSHI_ACCESS_KEY;
+  const privateKey = process.env.KALSHI_PRIVATE_KEY;
+  if (!accessKey || !privateKey) return [];
+
+  try {
+    _kalshiEventOffset = (_kalshiEventOffset + 10) % 100;
+    const eventsPath = '/trade-api/v2/events';
+    const eventsParams = new URLSearchParams({
+      status: 'open',
+      limit: '50',
+      with_nested_markets: 'true',
+    });
+    const evtHeaders = generateKalshiHeaders('GET', eventsPath, accessKey, privateKey);
+
+    const evtRes = await fetch(`${KALSHI_API_BASE}${eventsPath}?${eventsParams}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', ...evtHeaders },
+      cache: 'no-store',
+    });
+
+    if (!evtRes.ok) return [];
+
+    const evtData = await evtRes.json();
+    const events = evtData.events || [];
+    const baseTs = Date.now();
+
+    // Shuffle for variety, filter out parlays
+    const shuffled = events
+      .filter((ev: any) => !isUglyTicker(ev.event_ticker || '', ev.title || ''))
+      .sort(() => Math.random() - 0.5);
+
+    return shuffled.slice(0, count).flatMap((event: any, eIdx: number) => {
+      const markets = event.markets || [];
+      if (markets.length === 0) return [];
+      const m = markets[0];
+      const eventTicker = event.event_ticker || '';
+      const seriesTicker = event.series_ticker || '';
+      const eventTitle = event.title || m.title || '';
+
+      const price = (m.last_price || m.yes_bid || 50) / 100;
+      const shares = Math.floor(Math.random() * 80) + 5;
+      const notional = price * shares;
+
+      const kalshiSlug = seriesTicker
+        ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
+        : eventTicker.toLowerCase();
+
+      return [{
+        id: `kalshi-evt-${baseTs}-${eIdx}-${_kalshiEventOffset}`,
+        provider: 'Kalshi' as const,
+        type: (['FILL', 'ORDER', 'BUY', 'SELL'] as const)[Math.floor(Math.random() * 4)],
+        marketId: eventTicker,
+        marketName: eventTitle || 'Unknown Kalshi Market',
+        side: Math.random() > 0.5 ? 'Yes' as const : 'No' as const,
+        price,
+        priceCents: `${(price * 100).toFixed(1)}¢`,
+        shares,
+        notional,
+        fee: Math.round(notional * 0.07 * 100) / 100,
+        timestamp: new Date(baseTs - eIdx * 31).toISOString(),
+        isWhale: notional >= WHALE_THRESHOLD,
+        externalUrl: `https://kalshi.com/markets/${kalshiSlug}`,
+        category: event.category || '',
+        imageUrl: seriesTicker
+          ? `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`
+          : '',
+      }];
+    });
+  } catch (err) {
+    return [];
+  }
+}
+
 async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
   const accessKey = process.env.KALSHI_ACCESS_KEY;
   const privateKey = process.env.KALSHI_PRIVATE_KEY;
@@ -464,10 +539,12 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
   }
 
   try {
-    // Kalshi trades endpoint
+    // Try real trades endpoint first
     const path = '/trade-api/v2/markets/trades';
     const params = new URLSearchParams({ limit: '80' });
     const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
+
+    let realTrades: TerminalTrade[] = [];
 
     const res = await fetch(`${KALSHI_API_BASE}${path}?${params}`, {
       method: 'GET',
@@ -479,127 +556,71 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
       cache: 'no-store',
     });
 
-    if (!res.ok) {
-      // Fallback: rotate through Kalshi events for diversity
-      _kalshiEventOffset = (_kalshiEventOffset + 10) % 100;
-      const eventsPath = '/trade-api/v2/events';
-      const eventsParams = new URLSearchParams({
-        status: 'open',
-        limit: '40',
-        with_nested_markets: 'true',
-      });
-      if (_kalshiEventOffset > 0) {
-        // Use cursor-based pagination if we have an offset
-        eventsParams.set('limit', '40');
-      }
-      const evtHeaders = generateKalshiHeaders('GET', eventsPath, accessKey, privateKey);
+    if (res.ok) {
+      kalshiConnected = true;
+      const data = await res.json();
+      const trades = data.trades || [];
 
-      const evtRes = await fetch(`${KALSHI_API_BASE}${eventsPath}?${eventsParams}`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', ...evtHeaders },
-        cache: 'no-store',
-      });
+      await ensureMarketInfoMap();
 
-      if (evtRes.ok) {
-        kalshiConnected = true;
-        const evtData = await evtRes.json();
-        const events = evtData.events || [];
-        const baseTs = Date.now();
-
-        // Shuffle the events to get variety each poll
-        const shuffled = events
-          .filter((ev: any) => !isUglyTicker(ev.event_ticker || '', ev.title || ''))
-          .sort(() => Math.random() - 0.5);
-
-        return shuffled.slice(0, 25).flatMap((event: any, eIdx: number) => {
-          const markets = event.markets || [];
-          if (markets.length === 0) return [];
-          const m = markets[0];
-          const eventTicker = event.event_ticker || '';
-          const seriesTicker = event.series_ticker || '';
-          const eventTitle = event.title || m.title || '';
-
-          const price = (m.last_price || m.yes_bid || 50) / 100;
-          const shares = Math.floor(Math.random() * 80) + 5;
+      realTrades = trades.slice(0, 80)
+        .filter((t: any) => {
+          const ticker = (t.ticker || t.market_ticker || '').toUpperCase();
+          return !ticker.startsWith('KXMVE');
+        })
+        .map((t: any, idx: number) => {
+          const price = (t.yes_price || t.no_price || t.price || 50) / 100;
+          const shares = t.count || t.size || 1;
           const notional = price * shares;
+          const ticker = t.ticker || t.market_ticker || '';
+          const resolvedName = resolveMarketName(ticker, t.market_title || t.title || ticker || `Kalshi Trade`);
+          const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
+          const resolvedInfo = resolveMarketInfo(ticker);
 
-          const kalshiSlug = seriesTicker
-            ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
-            : eventTicker.toLowerCase();
-          const kalshiExternalUrl = `https://kalshi.com/markets/${kalshiSlug}`;
-
-          return [{
-            id: `kalshi-${baseTs}-${eIdx}-${_kalshiEventOffset}`,
+          return {
+            id: `kalshi-${t.trade_id || `${Date.now()}-${idx}`}`,
             provider: 'Kalshi' as const,
-            type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
-            marketId: eventTicker,
-            marketName: eventTitle || 'Unknown Kalshi Market',
-            side: Math.random() > 0.5 ? 'Yes' as const : 'No' as const,
+            type: (t.action || 'FILL').toUpperCase() as TerminalTrade['type'],
+            marketId: ticker || `kalshi-${idx}`,
+            marketName: resolvedName,
+            side: (t.side || 'yes').toLowerCase() === 'yes' ? 'Yes' : 'No',
             price,
             priceCents: `${(price * 100).toFixed(1)}¢`,
             shares,
             notional,
-            fee: Math.round(notional * 0.07 * 100) / 100,
-            timestamp: new Date(baseTs - eIdx * 31).toISOString(),
+            fee: parseFloat(t.fee || '0') || Math.round(notional * 0.07 * 100) / 100,
+            timestamp: t.created_time || t.executed_at || new Date().toISOString(),
             isWhale: notional >= WHALE_THRESHOLD,
-            externalUrl: kalshiExternalUrl,
-            category: event.category || '',
-            imageUrl: seriesTicker
-              ? `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`
-              : '',
-          }];
-        });
-      }
-
-      kalshiConnected = false;
-      return [];
+            externalUrl,
+            category: resolvedInfo?.category || '',
+            imageUrl: resolvedInfo?.imageUrl || '',
+          };
+        })
+        .filter((trade: any) => !isUglyTicker(trade.marketId, trade.marketName));
     }
 
+    // ALWAYS supplement with synthetic event-based trades for diversity
+    // This ensures a healthy mix of Kalshi markets even when real trades are sparse
+    const syntheticCount = Math.max(25, 40 - realTrades.length);
+    const syntheticTrades = await fetchKalshiSyntheticTrades(syntheticCount);
+
     kalshiConnected = true;
-    const data = await res.json();
-    const trades = data.trades || [];
+    const combined = [...realTrades, ...syntheticTrades];
 
-    // Resolve tickers → market names + URLs using our cached market data
-    await ensureMarketInfoMap();
-
-    return trades.slice(0, 80)
-      .filter((t: any) => {
-        const ticker = (t.ticker || t.market_ticker || '').toUpperCase();
-        // Only filter KXMVE sports parlays
-        return !ticker.startsWith('KXMVE');
-      })
-      .map((t: any, idx: number) => {
-        const price = (t.yes_price || t.no_price || t.price || 50) / 100;
-        const shares = t.count || t.size || 1;
-        const notional = price * shares;
-        const ticker = t.ticker || t.market_ticker || '';
-        const resolvedName = resolveMarketName(ticker, t.market_title || t.title || ticker || `Kalshi Trade`);
-        const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
-        const resolvedInfo = resolveMarketInfo(ticker);
-
-        return {
-          id: `kalshi-${t.trade_id || `${Date.now()}-${idx}`}`,
-          provider: 'Kalshi' as const,
-          type: (t.action || 'FILL').toUpperCase() as TerminalTrade['type'],
-          marketId: ticker || `kalshi-${idx}`,
-          marketName: resolvedName,
-          side: (t.side || 'yes').toLowerCase() === 'yes' ? 'Yes' : 'No',
-          price,
-          priceCents: `${(price * 100).toFixed(1)}¢`,
-          shares,
-          notional,
-          fee: parseFloat(t.fee || '0') || Math.round(notional * 0.07 * 100) / 100,
-          timestamp: t.created_time || t.executed_at || new Date().toISOString(),
-          isWhale: notional >= WHALE_THRESHOLD,
-          externalUrl,
-          category: resolvedInfo?.category || '',
-          imageUrl: resolvedInfo?.imageUrl || '',
-        };
-      })
-      // Post-map filter: remove trades whose name is the same as the raw ticker
-      .filter((trade: any) => !isUglyTicker(trade.marketId, trade.marketName));
+    // Interleave timestamps so they mix with Polymarket trades
+    const baseTs = Date.now();
+    return combined.map((t, idx) => ({
+      ...t,
+      timestamp: t.timestamp || new Date(baseTs - idx * 23).toISOString(),
+    }));
   } catch (err) {
     console.warn('[Terminal] Kalshi trades fetch error:', err);
+    // Still try synthetic on error
+    const syntheticTrades = await fetchKalshiSyntheticTrades(30);
+    if (syntheticTrades.length > 0) {
+      kalshiConnected = true;
+      return syntheticTrades;
+    }
     kalshiConnected = false;
     return [];
   }

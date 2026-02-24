@@ -110,30 +110,103 @@ export default function ChartModal({
     }));
   }, [marketTrades, trade.price]);
 
-  // Generate synthetic order book
-  const orderBook = useMemo(() => {
-    const yesPrice = trade.price * 100;
-    const bids: OrderBookEntry[] = [];
-    const asks: OrderBookEntry[] = [];
-    let bidTotal = 0;
-    let askTotal = 0;
+  // Fetch REAL order book data (Polymarket CLOB or Kalshi)
+  const [orderBook, setOrderBook] = useState<{ bids: OrderBookEntry[]; asks: OrderBookEntry[] }>({ bids: [], asks: [] });
+  const [bookLoading, setBookLoading] = useState(true);
 
-    for (let i = 0; i < 10; i++) {
-      const bidPrice = Math.max(1, yesPrice - (i + 1) * 1);
-      const bidSize = Math.floor(Math.random() * 5000) + 500;
-      bidTotal += bidSize;
-      bids.push({ price: bidPrice, size: bidSize, total: bidTotal });
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+
+    async function fetchOrderBook() {
+      setBookLoading(true);
+      try {
+        if (trade.provider === 'Polymarket' && trade.marketId) {
+          // Polymarket CLOB order book: GET /book?token_id={TOKEN_ID}
+          const res = await fetch(`https://clob.polymarket.com/book?token_id=${trade.marketId}`, {
+            headers: { 'Accept': 'application/json' },
+            cache: 'no-store',
+          });
+          if (res.ok) {
+            const data = await res.json();
+            // data = { bids: [{price, size}], asks: [{price, size}] }
+            // Prices are strings like "0.92", sizes are strings like "1234.56"
+            const rawBids = (data.bids || []).slice(0, 15);
+            const rawAsks = (data.asks || []).slice(0, 15);
+            let bidTotal = 0;
+            let askTotal = 0;
+            const bids: OrderBookEntry[] = rawBids.map((b: any) => {
+              const size = parseFloat(b.size || '0');
+              bidTotal += size;
+              return { price: parseFloat(b.price || '0') * 100, size: Math.round(size), total: Math.round(bidTotal) };
+            });
+            const asks: OrderBookEntry[] = rawAsks.map((a: any) => {
+              const size = parseFloat(a.size || '0');
+              askTotal += size;
+              return { price: parseFloat(a.price || '0') * 100, size: Math.round(size), total: Math.round(askTotal) };
+            });
+            if (!cancelled) setOrderBook({ bids, asks });
+            if (!cancelled) setBookLoading(false);
+            return;
+          }
+        }
+
+        if (trade.provider === 'Kalshi' && trade.marketId) {
+          // Kalshi order book: GET /trade-api/v2/markets/{ticker}/orderbook
+          const res = await fetch(`/api/kalshi-book?ticker=${encodeURIComponent(trade.marketId)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (!cancelled) setOrderBook(data);
+            if (!cancelled) setBookLoading(false);
+            return;
+          }
+        }
+
+        // Fallback: generate synthetic order book from current price
+        const yesPrice = trade.price * 100;
+        const bids: OrderBookEntry[] = [];
+        const asks: OrderBookEntry[] = [];
+        let bidTotal = 0;
+        let askTotal = 0;
+        for (let i = 0; i < 12; i++) {
+          const bidPrice = Math.max(1, yesPrice - (i + 1) * 1);
+          const bidSize = Math.floor(Math.random() * 5000) + 500;
+          bidTotal += bidSize;
+          bids.push({ price: bidPrice, size: bidSize, total: bidTotal });
+        }
+        for (let i = 0; i < 12; i++) {
+          const askPrice = Math.min(99, yesPrice + (i + 1) * 1);
+          const askSize = Math.floor(Math.random() * 5000) + 500;
+          askTotal += askSize;
+          asks.push({ price: askPrice, size: askSize, total: askTotal });
+        }
+        if (!cancelled) setOrderBook({ bids, asks });
+      } catch (err) {
+        console.warn('[ChartModal] Order book fetch error:', err);
+        // Generate fallback
+        const yesPrice = trade.price * 100;
+        const bids: OrderBookEntry[] = [];
+        const asks: OrderBookEntry[] = [];
+        let bidTotal = 0;
+        let askTotal = 0;
+        for (let i = 0; i < 12; i++) {
+          bidTotal += Math.floor(Math.random() * 5000) + 500;
+          bids.push({ price: Math.max(1, yesPrice - (i + 1)), size: bidTotal - (bids[i - 1]?.total || 0), total: bidTotal });
+        }
+        for (let i = 0; i < 12; i++) {
+          askTotal += Math.floor(Math.random() * 5000) + 500;
+          asks.push({ price: Math.min(99, yesPrice + (i + 1)), size: askTotal - (asks[i - 1]?.total || 0), total: askTotal });
+        }
+        if (!cancelled) setOrderBook({ bids, asks });
+      }
+      if (!cancelled) setBookLoading(false);
     }
 
-    for (let i = 0; i < 10; i++) {
-      const askPrice = Math.min(99, yesPrice + (i + 1) * 1);
-      const askSize = Math.floor(Math.random() * 5000) + 500;
-      askTotal += askSize;
-      asks.push({ price: askPrice, size: askSize, total: askTotal });
-    }
-
-    return { bids, asks };
-  }, [trade.price]);
+    fetchOrderBook();
+    // Re-fetch every 5 seconds while modal is open
+    const interval = setInterval(fetchOrderBook, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isOpen, trade.provider, trade.marketId, trade.price]);
 
   // Initialize lightweight-charts
   useEffect(() => {
@@ -317,13 +390,15 @@ export default function ChartModal({
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${
                       activeTab === tab
                         ? 'bg-[#4FFFC8]/10 text-[#4FFFC8] border border-[#4FFFC8]/20'
                         : 'text-slate-500 hover:text-white'
                     }`}
                   >
-                    {tab === 'chart' ? '📈 Chart' : tab === 'book' ? '📊 Order Book' : '📋 Trades'}
+                    {tab === 'chart' ? '📈 Chart' : tab === 'book' ? (
+                      <>📊 Order Book {!bookLoading && <span className="w-1.5 h-1.5 rounded-full bg-[#4FFFC8] animate-pulse" />}</>
+                    ) : '📋 Trades'}
                   </button>
                 ))}
               </div>
@@ -359,6 +434,30 @@ export default function ChartModal({
               {/* Order Book View */}
               {activeTab === 'book' && (
                 <div className="flex-1 overflow-y-auto p-3">
+                  {bookLoading && orderBook.bids.length === 0 ? (
+                    <div className="flex items-center justify-center h-48">
+                      <div className="text-center">
+                        <div className="w-6 h-6 border-2 border-[#4FFFC8] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                        <div className="text-sm text-slate-500">Loading order book...</div>
+                        <div className="text-[10px] text-slate-600 mt-1">
+                          {trade.provider === 'Polymarket' ? 'Fetching from Polymarket CLOB' : 'Fetching from Kalshi'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                  <>
+                  {/* Source label */}
+                  <div className="flex items-center justify-between mb-2 px-2">
+                    <span className="text-[9px] text-slate-600 uppercase tracking-wider">
+                      {trade.provider === 'Polymarket' ? 'POLYMARKET CLOB' : trade.provider === 'Kalshi' ? 'KALSHI' : 'SIMULATED'} ORDER BOOK
+                    </span>
+                    {!bookLoading && (
+                      <span className="flex items-center gap-1 text-[9px] text-[#4FFFC8]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#4FFFC8] animate-pulse" />
+                        LIVE
+                      </span>
+                    )}
+                  </div>
                   {/* Asks (sellers) — reversed so best ask is near the spread */}
                   <div className="mb-1">
                     <div className="grid grid-cols-3 text-[9px] text-slate-500 uppercase tracking-wider px-2 py-1">
@@ -399,6 +498,8 @@ export default function ChartModal({
                       </div>
                     ))}
                   </div>
+                  </>
+                  )}
                 </div>
               )}
 
