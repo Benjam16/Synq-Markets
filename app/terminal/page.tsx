@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -15,6 +15,7 @@ import {
   Volume2,
   VolumeX,
   ChevronRight,
+  ChevronLeft,
   RefreshCw,
   BarChart3,
   Target,
@@ -30,10 +31,14 @@ import {
   Check,
   Maximize2,
   X,
+  Settings,
+  Info,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Market } from '@/lib/types';
 import TradePanel from '../components/TradePanel';
+import { useAuth } from '../components/AuthProvider';
+import { toast } from 'react-hot-toast';
 
 // ============================================================================
 // TYPES (mirrored from terminal-engine)
@@ -131,6 +136,49 @@ interface TerminalStats {
 }
 
 // ============================================================================
+// TUTORIAL SLIDES
+// ============================================================================
+
+const TUTORIAL_SLIDES = [
+  {
+    title: 'Live Ticker',
+    icon: '📡',
+    description: 'Watch every trade across Polymarket and Kalshi in real-time. Trades flow in as they happen — BUYs, SELLs, FILLs, and ORDERs from both platforms are merged into a single unified stream.',
+    color: '#4FFFC8',
+  },
+  {
+    title: 'Instant Trade ⚡',
+    icon: '⚡',
+    description: 'Hit the lightning bolt on any trade to instantly copy it with your preset share amount. Configure your default shares in the settings gear. One click = trade executed. No confirmation needed.',
+    color: '#FBBF24',
+  },
+  {
+    title: 'Whale Alerts 🐋',
+    icon: '🐋',
+    description: 'Large trades over $5,000 are automatically flagged and appear in the Whale Alerts tab. Follow the smart money — whale movements often signal major market shifts before they happen.',
+    color: '#F59E0B',
+  },
+  {
+    title: 'Arbitrage Scanner',
+    icon: '🔀',
+    description: 'The engine continuously scans both Polymarket and Kalshi for price discrepancies on the same events. When the spread exceeds 3%, an opportunity is flagged with the exact profit potential per $1,000.',
+    color: '#7B61FF',
+  },
+  {
+    title: 'Market Scanner',
+    icon: '🔍',
+    description: 'Browse all live markets across both platforms in a sortable table. Filter by provider, category, or search by name. See real-time price changes and volume at a glance.',
+    color: '#3B82F6',
+  },
+  {
+    title: 'Activity Heatmap',
+    icon: '🟩',
+    description: 'The 60-second heatmap at the top shows trade intensity over the last minute. Brighter bars = more trades. Use it to gauge market activity levels and identify bursts of trading.',
+    color: '#4FFFC8',
+  },
+];
+
+// ============================================================================
 // MAIN TERMINAL PAGE
 // ============================================================================
 
@@ -165,8 +213,46 @@ export default function TerminalPage() {
   const [quickTradeMarket, setQuickTradeMarket] = useState<Market | null>(null);
   const [isQuickTradeOpen, setIsQuickTradeOpen] = useState(false);
   const [copiedTrade, setCopiedTrade] = useState<string | null>(null);
+
+  // ── Instant Trade State ──
+  const [instantTradeShares, setInstantTradeShares] = useState<number>(10);
+  const [showInstantSettings, setShowInstantSettings] = useState(false);
+  const [instantTradeProcessing, setInstantTradeProcessing] = useState<string | null>(null);
+  const [instantTradeSuccess, setInstantTradeSuccess] = useState<string | null>(null);
+
+  // ── Tutorial State ──
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialSlide, setTutorialSlide] = useState(0);
+
   const tradeListRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const userIdCacheRef = useRef<number | null>(null);
+  const seenWhaleIdsRef = useRef<Set<string>>(new Set());
+
+  const { user } = useAuth();
+
+  // ── Load instant trade settings from localStorage ──
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('terminal-instant-shares');
+      if (saved) setInstantTradeShares(Number(saved) || 10);
+      const tutorialSeen = localStorage.getItem('terminal-tutorial-seen');
+      if (!tutorialSeen) setShowTutorial(true);
+    } catch {}
+  }, []);
+
+  // ── Save instant trade shares ──
+  const updateInstantShares = useCallback((val: number) => {
+    const clamped = Math.max(1, Math.min(10000, val));
+    setInstantTradeShares(clamped);
+    try { localStorage.setItem('terminal-instant-shares', String(clamped)); } catch {}
+  }, []);
+
+  // ── Dismiss tutorial ──
+  const dismissTutorial = useCallback(() => {
+    setShowTutorial(false);
+    try { localStorage.setItem('terminal-tutorial-seen', '1'); } catch {}
+  }, []);
 
   // ── Sound Effect ──
   useEffect(() => {
@@ -181,6 +267,42 @@ export default function TerminalPage() {
     }
   }, [soundEnabled]);
 
+  // ── Get or create userId (cached) ──
+  const getUserId = useCallback(async (): Promise<number | null> => {
+    if (userIdCacheRef.current) return userIdCacheRef.current;
+    if (!user?.email) return null;
+
+    try {
+      const res = await fetch(`/api/user?email=${encodeURIComponent(user.email)}`);
+      if (res.ok) {
+        const { user: dbUser } = await res.json();
+        if (dbUser?.id) {
+          userIdCacheRef.current = dbUser.id;
+          return dbUser.id;
+        }
+      }
+      // Create user if not found
+      const createRes = await fetch('/api/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supabaseUserId: user.id,
+          email: user.email,
+          fullName: user.user_metadata?.full_name || user.email.split('@')[0],
+        }),
+      });
+      if (createRes.ok) {
+        const data = await createRes.json();
+        const id = data.userId ?? data.user?.id ?? null;
+        if (id) userIdCacheRef.current = id;
+        return id;
+      }
+    } catch (err) {
+      console.warn('[Terminal] getUserId error:', err);
+    }
+    return null;
+  }, [user]);
+
   // ── Copy Trade to Clipboard ──
   const copyTrade = useCallback((trade: TerminalTrade | WhaleAlert) => {
     const typePart = 'type' in trade ? (trade as TerminalTrade).type : 'BUY';
@@ -191,6 +313,25 @@ export default function TerminalPage() {
       setTimeout(() => setCopiedTrade(null), 2000);
     });
   }, []);
+
+  // ── Helpers ──
+  const formatTime = (ts: string) => {
+    try {
+      const d = new Date(ts);
+      return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as any);
+    } catch { return '--:--:--'; }
+  };
+
+  const formatUSD = (n: number) => {
+    if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+    return `$${n.toFixed(0)}`;
+  };
+
+  const formatPnl = (n: number) => {
+    const sign = n >= 0 ? '+' : '';
+    return `${sign}${formatUSD(n)}`;
+  };
 
   // ── Build Market object from trade data ──
   const buildMarketFromTrade = useCallback((trade: TerminalTrade | WhaleAlert, tradeProvider?: string): Market => {
@@ -216,14 +357,79 @@ export default function TerminalPage() {
     };
   }, []);
 
-  // ── Open Quick Trade Panel ──
-  const quickTrade = useCallback((trade: TerminalTrade | WhaleAlert) => {
+  // ══════════════════════════════════════════════════════════════════════════
+  // INSTANT TRADE — executes immediately, no confirmation
+  // ══════════════════════════════════════════════════════════════════════════
+  const executeInstantTrade = useCallback(async (trade: TerminalTrade | WhaleAlert) => {
+    if (!user) {
+      toast.error('Please sign in to trade');
+      return;
+    }
+
+    const tradeId = trade.id;
+    setInstantTradeProcessing(tradeId);
+
+    try {
+      const userId = await getUserId();
+      if (!userId) {
+        toast.error('Could not resolve account — please refresh');
+        setInstantTradeProcessing(null);
+        return;
+      }
+
+      const side = (trade.side === 'Yes' || trade.side === 'Up') ? 'yes' : 'no';
+      const market = buildMarketFromTrade(trade);
+
+      const res = await fetch('/api/buy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          marketId: market.id || market.conditionId,
+          provider: (market.provider || 'polymarket').toLowerCase(),
+          side,
+          outcome: trade.side,
+          price: trade.price,
+          quantity: instantTradeShares,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && !data.error) {
+        setInstantTradeSuccess(tradeId);
+        playClick();
+        toast.success(
+          `⚡ Instant: ${instantTradeShares} ${trade.side} @ ${(trade.price * 100).toFixed(1)}¢`,
+          { style: { background: '#0a0a0a', color: '#4FFFC8', border: '1px solid #4FFFC8' }, duration: 2000 }
+        );
+        setTimeout(() => setInstantTradeSuccess(null), 2000);
+      } else {
+        const errMsg = data.error || 'Trade failed';
+        if (errMsg.includes('No active challenge')) {
+          toast.error('No active challenge — purchase one first');
+        } else if (errMsg.includes('Insufficient')) {
+          toast.error('Insufficient balance for this trade');
+        } else {
+          toast.error(`Trade failed: ${errMsg}`);
+        }
+      }
+    } catch (err: any) {
+      console.error('[InstantTrade] Error:', err);
+      toast.error('Network error — try again');
+    } finally {
+      setInstantTradeProcessing(null);
+    }
+  }, [user, getUserId, instantTradeShares, buildMarketFromTrade, playClick]);
+
+  // ── Open Trade Panel (expand button — full trade UI) ──
+  const openTradePanel = useCallback((trade: TerminalTrade | WhaleAlert) => {
     const market = buildMarketFromTrade(trade);
     setQuickTradeMarket(market);
     setIsQuickTradeOpen(true);
   }, [buildMarketFromTrade]);
 
-  // ── Open Market Modal ──
+  // ── Open Market Modal (view full market card) ──
   const openMarketModal = useCallback((trade: TerminalTrade | WhaleAlert) => {
     const market = buildMarketFromTrade(trade);
     setSelectedMarket(market);
@@ -253,7 +459,25 @@ export default function TerminalPage() {
         }
 
         setTrades(data.trades || []);
-        setWhaleAlerts(data.whaleAlerts || []);
+
+        // ── Deduplicate whale alerts ──
+        const incomingWhales: WhaleAlert[] = data.whaleAlerts || [];
+        const uniqueWhales: WhaleAlert[] = [];
+        for (const w of incomingWhales) {
+          // Create a stable key from provider + marketId + side + notional + timestamp
+          const key = `${w.provider}-${w.marketId}-${w.side}-${w.notional}-${w.timestamp}`;
+          if (!seenWhaleIdsRef.current.has(key)) {
+            seenWhaleIdsRef.current.add(key);
+            uniqueWhales.push(w);
+          }
+        }
+        // Merge with existing (keep most recent first, cap at 50)
+        setWhaleAlerts(prev => {
+          const prevIds = new Set(prev.map(w => w.id));
+          const brandNew = uniqueWhales.filter(w => !prevIds.has(w.id));
+          return [...brandNew, ...prev].slice(0, 50);
+        });
+
         setArbSignals(data.arbSignals || []);
         setMarketTicks(data.marketTicks || []);
         setStats(data.stats || null);
@@ -266,7 +490,7 @@ export default function TerminalPage() {
     };
 
     poll(); // Immediate fetch on mount
-    const interval = setInterval(poll, 2000); // Faster 2s polling for live feel
+    const interval = setInterval(poll, 2000);
 
     return () => {
       mounted = false;
@@ -279,7 +503,7 @@ export default function TerminalPage() {
   // ── Auto-scroll trade list ──
   useEffect(() => {
     if (tradeListRef.current && activeTab === 'live') {
-      tradeListRef.current.scrollTop = 0; // New trades at top
+      tradeListRef.current.scrollTop = 0;
     }
   }, [trades, activeTab]);
 
@@ -303,44 +527,25 @@ export default function TerminalPage() {
     }
   };
 
-  // ── Helpers ──
-  const formatTime = (ts: string) => {
-    try {
-      const d = new Date(ts);
-      return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as any);
-    } catch { return '--:--:--'; }
-  };
-
-  const formatUSD = (n: number) => {
-    if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-    if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-    return `$${n.toFixed(0)}`;
-  };
-
-  const formatPnl = (n: number) => {
-    const sign = n >= 0 ? '+' : '';
-    return `${sign}${formatUSD(n)}`;
-  };
-
   // ── Filtered scanner ticks ──
-  const filteredTicks = marketTicks.filter(t => {
+  const filteredTicks = useMemo(() => marketTicks.filter(t => {
     if (scannerFilter !== 'all' && t.provider !== scannerFilter) return false;
     if (scannerCategory !== 'All' && t.category !== scannerCategory) return false;
     if (scannerSearch && !t.name.toLowerCase().includes(scannerSearch.toLowerCase())) return false;
     return true;
-  });
+  }), [marketTicks, scannerFilter, scannerCategory, scannerSearch]);
 
-  const categories = ['All', ...Array.from(new Set(marketTicks.map(t => t.category)))];
+  const categories = useMemo(() => ['All', ...Array.from(new Set(marketTicks.map(t => t.category)))], [marketTicks]);
 
   // ── Filtered live trades ──
-  const filteredTrades = trades.filter(t => {
+  const filteredTrades = useMemo(() => trades.filter(t => {
     if (liveSubTab === 'orders' && t.type !== 'ORDER') return false;
     if (liveSubTab === 'fills' && t.type !== 'FILL' && t.type !== 'BUY' && t.type !== 'SELL') return false;
     return true;
-  });
+  }), [trades, liveSubTab]);
 
   // ── Activity Heatmap (last 60 seconds) ──
-  const heatmapDots = Array.from({ length: 60 }, (_, i) => {
+  const heatmapDots = useMemo(() => Array.from({ length: 60 }, (_, i) => {
     const secondAgo = 59 - i;
     const cutoff = Date.now() - secondAgo * 1000;
     const cutoffEnd = cutoff + 1000;
@@ -349,7 +554,67 @@ export default function TerminalPage() {
       return ts >= cutoff && ts < cutoffEnd;
     }).length;
     return count;
-  });
+  }), [trades]);
+
+  // ── Action Buttons Component (reused in Live Ticker + Whale Alerts) ──
+  const ActionButtons = ({ trade, isWhaleContext }: { trade: TerminalTrade | WhaleAlert; isWhaleContext?: boolean }) => (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      {/* ⚡ INSTANT TRADE — executes immediately */}
+      <button
+        onClick={() => executeInstantTrade(trade)}
+        disabled={instantTradeProcessing === trade.id}
+        className={`p-1.5 rounded-md transition-colors group relative ${
+          instantTradeSuccess === trade.id
+            ? 'bg-[#4FFFC8]/30'
+            : instantTradeProcessing === trade.id
+              ? 'bg-amber-500/20 animate-pulse'
+              : 'hover:bg-[#4FFFC8]/20'
+        }`}
+        title={`Instant trade: ${instantTradeShares} shares ${trade.side}`}
+      >
+        {instantTradeSuccess === trade.id ? (
+          <Check className="w-3.5 h-3.5 text-[#4FFFC8]" />
+        ) : instantTradeProcessing === trade.id ? (
+          <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+        ) : (
+          <Zap className="w-3.5 h-3.5 text-[#4FFFC8]/70 group-hover:text-[#4FFFC8]" />
+        )}
+      </button>
+
+      {/* 📋 COPY TRADE — clipboard */}
+      <button
+        onClick={() => copyTrade(trade)}
+        className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
+        title="Copy trade details"
+      >
+        {copiedTrade === trade.id ? (
+          <Check className="w-3.5 h-3.5 text-[#4FFFC8]" />
+        ) : (
+          <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
+        )}
+      </button>
+
+      {/* 🔲 EXPAND — opens full trade panel */}
+      <button
+        onClick={() => openTradePanel(trade)}
+        className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
+        title="Open trade panel"
+      >
+        <Maximize2 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
+      </button>
+
+      {/* 🔗 EXTERNAL LINK */}
+      <a
+        href={trade.externalUrl || (trade.provider === 'Kalshi' ? `https://kalshi.com/markets` : `https://polymarket.com`)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
+        title={`Open on ${trade.provider}`}
+      >
+        <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-[#4FFFC8]" />
+      </a>
+    </div>
+  );
 
   // ============================================================================
   // RENDER
@@ -357,6 +622,91 @@ export default function TerminalPage() {
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col bg-[#050505] bg-grid-trading text-white font-[family-name:var(--font-inter)] overflow-hidden">
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TUTORIAL SLIDESHOW OVERLAY
+          ══════════════════════════════════════════════════════════════════════ */}
+      <AnimatePresence>
+        {showTutorial && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md"
+            onClick={dismissTutorial}
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.85, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="w-full max-w-lg bg-[#0a0a0a] border border-[#1A1A1A] rounded-2xl overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Slide content */}
+              <div className="p-8 text-center">
+                <div className="text-5xl mb-4">{TUTORIAL_SLIDES[tutorialSlide].icon}</div>
+                <h2 className="text-2xl font-bold text-white mb-3">
+                  {TUTORIAL_SLIDES[tutorialSlide].title}
+                </h2>
+                <p className="text-sm text-slate-400 leading-relaxed max-w-md mx-auto">
+                  {TUTORIAL_SLIDES[tutorialSlide].description}
+                </p>
+              </div>
+
+              {/* Dots + Navigation */}
+              <div className="flex items-center justify-between px-6 py-4 border-t border-[#1A1A1A]">
+                <button
+                  onClick={() => setTutorialSlide(s => Math.max(0, s - 1))}
+                  disabled={tutorialSlide === 0}
+                  className="p-2 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-5 h-5 text-slate-400" />
+                </button>
+
+                <div className="flex items-center gap-2">
+                  {TUTORIAL_SLIDES.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setTutorialSlide(i)}
+                      className={`w-2 h-2 rounded-full transition-all ${
+                        i === tutorialSlide ? 'bg-[#4FFFC8] w-6' : 'bg-slate-600 hover:bg-slate-400'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {tutorialSlide < TUTORIAL_SLIDES.length - 1 ? (
+                  <button
+                    onClick={() => setTutorialSlide(s => s + 1)}
+                    className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                  >
+                    <ChevronRight className="w-5 h-5 text-slate-400" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={dismissTutorial}
+                    className="px-4 py-1.5 rounded-full bg-[#4FFFC8] text-black font-bold text-xs hover:bg-[#3de6b3] transition-colors"
+                  >
+                    Start Trading
+                  </button>
+                )}
+              </div>
+
+              {/* Skip button */}
+              <div className="px-6 pb-4 text-center">
+                <button
+                  onClick={dismissTutorial}
+                  className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
+                >
+                  Skip tutorial
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Top Banner ── */}
       <div className="border-b border-[#1A1A1A] bg-[#0a0a0a]">
         <div className="max-w-[1800px] mx-auto px-4 sm:px-6 py-2 flex items-center justify-between text-xs">
@@ -365,12 +715,22 @@ export default function TerminalPage() {
               Live
             </span>
             <span className="text-slate-400">
-              Powered by <span className="text-white font-semibold">Prop Market Terminal</span> — real-time prediction market analytics for Polymarket &amp; Kalshi
+              Powered by <span className="text-white font-semibold">Prop Market Terminal</span> — real-time prediction market analytics
             </span>
           </div>
-          <Link href="/markets" className="text-[#4FFFC8] hover:text-white transition-colors font-medium flex items-center gap-1">
-            Browse Markets <ArrowRight className="w-3 h-3" />
-          </Link>
+          <div className="flex items-center gap-3">
+            {/* Tutorial help button */}
+            <button
+              onClick={() => { setTutorialSlide(0); setShowTutorial(true); }}
+              className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+              title="Terminal guide"
+            >
+              <Info className="w-3.5 h-3.5 text-slate-500 hover:text-white" />
+            </button>
+            <Link href="/markets" className="text-[#4FFFC8] hover:text-white transition-colors font-medium flex items-center gap-1">
+              Browse Markets <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -426,8 +786,69 @@ export default function TerminalPage() {
             </div>
           </div>
 
-          {/* Right: Sound toggle + Stats */}
+          {/* Right: Instant Trade Settings + Sound + Stats */}
           <div className="flex items-center gap-4">
+            {/* Instant Trade Settings */}
+            <div className="relative">
+              <button
+                onClick={() => setShowInstantSettings(!showInstantSettings)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                  showInstantSettings
+                    ? 'border-[#4FFFC8]/50 bg-[#4FFFC8]/10 text-[#4FFFC8]'
+                    : 'border-[#1A1A1A] text-slate-400 hover:text-white hover:border-slate-600'
+                }`}
+              >
+                <Zap className="w-3 h-3" />
+                <span>{instantTradeShares} shares</span>
+                <Settings className="w-3 h-3" />
+              </button>
+
+              {/* Settings Dropdown */}
+              <AnimatePresence>
+                {showInstantSettings && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -5 }}
+                    className="absolute top-full right-0 mt-2 w-64 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl p-4 z-50 shadow-2xl"
+                  >
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">
+                      ⚡ Instant Trade Settings
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mb-3">
+                      How many shares to auto-buy when you press the ⚡ button. Trade executes instantly — no confirmation.
+                    </p>
+                    <div className="flex items-center gap-2 mb-3">
+                      <input
+                        type="number"
+                        min={1}
+                        max={10000}
+                        value={instantTradeShares}
+                        onChange={(e) => updateInstantShares(Number(e.target.value))}
+                        className="flex-1 bg-white/[0.03] border border-[#1A1A1A] rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-[#4FFFC8]/40"
+                      />
+                      <span className="text-xs text-slate-500">shares</span>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {[5, 10, 25, 50, 100, 250].map(v => (
+                        <button
+                          key={v}
+                          onClick={() => updateInstantShares(v)}
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                            instantTradeShares === v
+                              ? 'bg-[#4FFFC8]/20 text-[#4FFFC8] border border-[#4FFFC8]/30'
+                              : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'
+                          }`}
+                        >
+                          {v}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
             <div className="flex items-center gap-3 text-xs text-slate-400">
               <span>Trades: <span className="text-white font-mono">{stats?.totalTrades || 0}</span></span>
               <span>Vol: <span className="text-white font-mono">{formatUSD(stats?.totalVolume || 0)}</span></span>
@@ -630,49 +1051,7 @@ export default function TerminalPage() {
                       </span>
 
                       {/* Action Buttons */}
-                      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                        {/* Quick Trade Button */}
-                        <button
-                          onClick={() => quickTrade(trade)}
-                          className="p-1.5 rounded-md hover:bg-[#4FFFC8]/20 transition-colors group relative"
-                          title="Quick Trade"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-[#4FFFC8]/70 group-hover:text-[#4FFFC8]" />
-                        </button>
-
-                        {/* Copy Trade Button */}
-                        <button
-                          onClick={() => copyTrade(trade)}
-                          className="p-1.5 rounded-md hover:bg-white/10 transition-colors group relative"
-                          title="Copy trade details"
-                        >
-                          {copiedTrade === trade.id ? (
-                            <Check className="w-3.5 h-3.5 text-[#4FFFC8]" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
-                          )}
-                        </button>
-
-                        {/* View Market Card */}
-                        <button
-                          onClick={() => openMarketModal(trade)}
-                          className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
-                          title="View market card"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
-                        </button>
-
-                        {/* External Link to Official Market Page */}
-                        <a
-                          href={trade.externalUrl || (trade.provider === 'Kalshi' ? `https://kalshi.com/markets` : `https://polymarket.com`)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
-                          title={`Open on ${trade.provider}`}
-                        >
-                          <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-[#4FFFC8]" />
-                        </a>
-                      </div>
+                      <ActionButtons trade={trade} />
                     </motion.div>
                   ))
                 )}
@@ -699,7 +1078,7 @@ export default function TerminalPage() {
                   </h2>
                 </div>
                 <span className="text-xs text-slate-500">
-                  {whaleAlerts.length} sightings tracked
+                  {whaleAlerts.length} unique sightings
                 </span>
               </div>
 
@@ -732,49 +1111,7 @@ export default function TerminalPage() {
                           <div className="text-[10px] text-slate-500">{formatTime(whale.timestamp)}</div>
                         </div>
                         {/* Action Buttons */}
-                        <div className="flex items-center gap-1">
-                          {/* Quick Trade Button */}
-                          <button
-                            onClick={() => quickTrade(whale)}
-                            className="p-1.5 rounded-md hover:bg-[#4FFFC8]/20 transition-colors group relative"
-                            title="Quick Trade"
-                          >
-                            <Zap className="w-3.5 h-3.5 text-[#4FFFC8]/70 group-hover:text-[#4FFFC8]" />
-                          </button>
-
-                          {/* Copy Trade Button */}
-                          <button
-                            onClick={() => copyTrade(whale)}
-                            className="p-1.5 rounded-md hover:bg-white/10 transition-colors group relative"
-                            title="Copy trade details"
-                          >
-                            {copiedTrade === whale.id ? (
-                              <Check className="w-3.5 h-3.5 text-[#4FFFC8]" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
-                            )}
-                          </button>
-
-                          {/* View Market Card */}
-                          <button
-                            onClick={() => openMarketModal(whale)}
-                            className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
-                            title="View market card"
-                          >
-                            <Maximize2 className="w-3.5 h-3.5 text-slate-500 group-hover:text-white" />
-                          </button>
-
-                          {/* External Link to Official Market Page */}
-                          <a
-                            href={whale.externalUrl || (whale.provider === 'Kalshi' ? `https://kalshi.com/markets` : `https://polymarket.com`)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-md hover:bg-white/10 transition-colors group"
-                            title={`Open on ${whale.provider}`}
-                          >
-                            <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-[#4FFFC8]" />
-                          </a>
-                        </div>
+                        <ActionButtons trade={whale} isWhaleContext />
                       </div>
                     </div>
                   ))}
@@ -1076,7 +1413,9 @@ export default function TerminalPage() {
         </AnimatePresence>
       </div>
 
-      {/* Market Detail Modal */}
+      {/* ══════════════════════════════════════════════════════════════════════
+          MARKET DETAIL MODAL (Enhanced — shows full card with Yes/No odds)
+          ══════════════════════════════════════════════════════════════════════ */}
       <AnimatePresence>
         {selectedMarket && (
           <motion.div
@@ -1118,24 +1457,47 @@ export default function TerminalPage() {
               {/* Modal Content */}
               <div className="p-6">
                 <h3 className="text-xl font-bold text-white mb-4">{selectedMarket.eventTitle || selectedMarket.name}</h3>
-                
+
+                {/* Yes / No Odds Display */}
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="p-4 bg-[#4FFFC8]/5 rounded-xl border border-[#4FFFC8]/20">
+                    <div className="text-[10px] text-[#4FFFC8] uppercase tracking-wider font-bold mb-1">Yes</div>
+                    <div className="text-3xl font-mono font-bold text-[#4FFFC8]">
+                      {((selectedMarket.yesPrice ?? selectedMarket.price) * 100).toFixed(1)}¢
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {((selectedMarket.yesPrice ?? selectedMarket.price) * 100).toFixed(0)}% probability
+                    </div>
+                  </div>
+                  <div className="p-4 bg-red-500/5 rounded-xl border border-red-500/20">
+                    <div className="text-[10px] text-red-400 uppercase tracking-wider font-bold mb-1">No</div>
+                    <div className="text-3xl font-mono font-bold text-red-400">
+                      {((selectedMarket.noPrice ?? (1 - selectedMarket.price)) * 100).toFixed(1)}¢
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {((selectedMarket.noPrice ?? (1 - selectedMarket.price)) * 100).toFixed(0)}% probability
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats Row */}
                 <div className="grid grid-cols-3 gap-4 mb-6">
-                  <div className="p-4 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
+                  <div className="p-3 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
                     <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Price</div>
-                    <div className="text-2xl font-mono font-bold text-[#4FFFC8]">
+                    <div className="text-xl font-mono font-bold text-white">
                       ${selectedMarket.price.toFixed(2)}
                     </div>
                   </div>
-                  <div className="p-4 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
+                  <div className="p-3 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
                     <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Volume</div>
-                    <div className="text-2xl font-mono font-bold text-white">
+                    <div className="text-xl font-mono font-bold text-white">
                       {formatUSD(selectedMarket.volume)}
                     </div>
                   </div>
-                  <div className="p-4 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Probability</div>
-                    <div className="text-2xl font-mono font-bold text-white">
-                      {(selectedMarket.price * 100).toFixed(0)}%
+                  <div className="p-3 bg-white/[0.02] rounded-xl border border-[#1A1A1A]">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Provider</div>
+                    <div className="text-xl font-bold text-white">
+                      {selectedMarket.provider}
                     </div>
                   </div>
                 </div>
@@ -1145,8 +1507,9 @@ export default function TerminalPage() {
                   {/* Trade This Market — opens trade panel */}
                   <button
                     onClick={() => {
+                      const mkt = selectedMarket;
                       setSelectedMarket(null);
-                      setQuickTradeMarket(selectedMarket);
+                      setQuickTradeMarket(mkt);
                       setIsQuickTradeOpen(true);
                     }}
                     className="flex-1 py-3 rounded-xl bg-[#4FFFC8] text-black font-bold text-sm text-center hover:bg-[#3de6b3] transition-colors"
@@ -1183,6 +1546,7 @@ export default function TerminalPage() {
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(`${selectedMarket.name} - $${selectedMarket.price.toFixed(2)}`);
+                      toast.success('Copied!', { duration: 1500 });
                     }}
                     className="px-4 py-3 rounded-xl border border-[#1A1A1A] text-slate-400 hover:text-white hover:border-[#4FFFC8]/30 transition-colors"
                     title="Copy market info"
@@ -1196,15 +1560,14 @@ export default function TerminalPage() {
         )}
       </AnimatePresence>
 
-      {/* Quick Trade Panel */}
+      {/* Quick Trade Panel (full trade UI — expand button) */}
       {isQuickTradeOpen && quickTradeMarket && (
         <TradePanel
           market={quickTradeMarket}
           isOpen={isQuickTradeOpen}
           onClose={() => setIsQuickTradeOpen(false)}
           onTrade={(market, side, quantity) => {
-            // Placeholder for quick trade action within terminal
-            console.log(`Quick trade placed: ${quantity} shares of ${side} on ${market.name}`);
+            console.log(`Trade placed: ${quantity} shares of ${side} on ${market.name}`);
             setIsQuickTradeOpen(false);
           }}
         />

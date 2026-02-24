@@ -566,13 +566,26 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
 }
 
 // ============================================================================
-// WHALE DETECTION
+// WHALE DETECTION (with deduplication)
 // ============================================================================
 
+// Track seen whale IDs to prevent duplicates
+const seenWhaleKeys = new Set<string>();
+
 function detectWhales(trades: TerminalTrade[]): WhaleAlert[] {
-  return trades
-    .filter(t => t.notional >= WHALE_THRESHOLD)
-    .map(t => ({
+  const results: WhaleAlert[] = [];
+  for (const t of trades) {
+    if (t.notional < WHALE_THRESHOLD) continue;
+    // Create a stable dedup key: provider + marketId + side + notional rounded + timestamp
+    const dedupKey = `${t.provider}-${t.marketId}-${t.side}-${Math.round(t.notional)}-${t.timestamp}`;
+    if (seenWhaleKeys.has(dedupKey)) continue;
+    seenWhaleKeys.add(dedupKey);
+    // Cap the dedup set to prevent memory leaks
+    if (seenWhaleKeys.size > 2000) {
+      const entries = Array.from(seenWhaleKeys);
+      entries.slice(0, 500).forEach(k => seenWhaleKeys.delete(k));
+    }
+    results.push({
       id: `whale-${t.id}`,
       provider: t.provider,
       marketId: t.marketId,
@@ -584,7 +597,9 @@ function detectWhales(trades: TerminalTrade[]): WhaleAlert[] {
       walletAddress: t.walletAddress,
       timestamp: t.timestamp,
       externalUrl: t.externalUrl,
-    }));
+    });
+  }
+  return results;
 }
 
 // ============================================================================
