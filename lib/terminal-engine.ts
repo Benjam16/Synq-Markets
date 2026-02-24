@@ -15,16 +15,22 @@
 import { generateKalshiHeaders } from './kalshi-auth';
 
 // ============================================================================
-// MARKET NAME RESOLVER — maps tickers → real names from cached market data
+// MARKET NAME & URL RESOLVER — maps tickers → names + external URLs
 // ============================================================================
 
-let _marketNameMap: Map<string, string> = new Map();
-let _marketNameMapAge = 0;
-const MARKET_NAME_MAP_TTL = 60_000; // 60 seconds
+interface MarketInfo {
+  name: string;
+  externalUrl: string;
+  category: string;
+}
 
-async function ensureMarketNameMap(): Promise<void> {
+let _marketInfoMap: Map<string, MarketInfo> = new Map();
+let _marketInfoMapAge = 0;
+const MARKET_INFO_MAP_TTL = 60_000; // 60 seconds
+
+async function ensureMarketInfoMap(): Promise<void> {
   const now = Date.now();
-  if (_marketNameMap.size > 0 && (now - _marketNameMapAge) < MARKET_NAME_MAP_TTL) return;
+  if (_marketInfoMap.size > 0 && (now - _marketInfoMapAge) < MARKET_INFO_MAP_TTL) return;
 
   try {
     const res = await fetch(
@@ -34,30 +40,65 @@ async function ensureMarketNameMap(): Promise<void> {
     if (!res.ok) return;
     const data = await res.json();
     const markets = data.markets || [];
-    const m = new Map<string, string>();
+    const m = new Map<string, MarketInfo>();
     for (const mkt of markets) {
       const name = mkt.eventTitle || mkt.name || '';
       if (!name) continue;
+      const info: MarketInfo = {
+        name,
+        externalUrl: mkt.kalshiUrl || mkt.polymarketUrl || '',
+        category: mkt.category || 'General',
+      };
       // Map by id, slug, and conditionId so any ticker format can match
-      if (mkt.id) m.set(mkt.id.toLowerCase(), name);
-      if (mkt.slug) m.set(mkt.slug.toLowerCase(), name);
-      if (mkt.conditionId) m.set(mkt.conditionId.toLowerCase(), name);
+      if (mkt.id) m.set(mkt.id.toLowerCase(), info);
+      if (mkt.slug) m.set(mkt.slug.toLowerCase(), info);
+      if (mkt.conditionId) m.set(mkt.conditionId.toLowerCase(), info);
     }
-    _marketNameMap = m;
-    _marketNameMapAge = now;
+    _marketInfoMap = m;
+    _marketInfoMapAge = now;
   } catch { /* keep stale map */ }
 }
 
-function resolveMarketName(ticker: string, fallback: string): string {
-  if (!ticker) return fallback;
+function resolveMarketInfo(ticker: string): MarketInfo | null {
+  if (!ticker) return null;
   const key = ticker.toLowerCase();
-  // Try exact match
-  if (_marketNameMap.has(key)) return _marketNameMap.get(key)!;
-  // Try prefix match (kalshi tickers like "KXBTC-25FEB28" → "KXBTC")
-  for (const [k, v] of _marketNameMap.entries()) {
+  // Exact match
+  if (_marketInfoMap.has(key)) return _marketInfoMap.get(key)!;
+  // Prefix match (kalshi tickers like "KXBTC-25FEB28" → "KXBTC")
+  for (const [k, v] of _marketInfoMap.entries()) {
     if (key.startsWith(k) || k.startsWith(key)) return v;
   }
-  return fallback;
+  return null;
+}
+
+function resolveMarketName(ticker: string, fallback: string): string {
+  const info = resolveMarketInfo(ticker);
+  return info?.name || fallback;
+}
+
+function resolveExternalUrl(ticker: string, provider: 'Polymarket' | 'Kalshi', fallbackEventTicker?: string): string {
+  // Try cached market data first (most reliable source of URLs)
+  const info = resolveMarketInfo(ticker);
+  if (info?.externalUrl) return info.externalUrl;
+
+  // Fallback: construct URL from event ticker
+  if (provider === 'Kalshi') {
+    // Use the event ticker (not the market ticker with date suffixes)
+    const eventTicker = fallbackEventTicker || ticker;
+    // Extract just the series part (before first '-') for the series path
+    const seriesPart = eventTicker.split('-')[0] || eventTicker;
+    // Kalshi URL: /markets/{event_ticker_lowercase} 
+    return `https://kalshi.com/markets/${eventTicker.toLowerCase()}`;
+  }
+  return `https://polymarket.com`;
+}
+
+// KXMVE parlay filter — these are auto-generated sports parlays with ugly names
+function isKxmveParlay(ticker: string, name: string): boolean {
+  if (!ticker && !name) return false;
+  const t = (ticker || '').toUpperCase();
+  const n = (name || '').toUpperCase();
+  return t.startsWith('KXMVE') || n.includes('KXMVESPORTS');
 }
 
 // ============================================================================
@@ -327,28 +368,35 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
         const events = evtData.events || [];
         const baseTs = Date.now();
 
-        return events.slice(0, 20).flatMap((event: any, eIdx: number) => {
+        return events.slice(0, 30).flatMap((event: any, eIdx: number) => {
           const markets = event.markets || [];
           if (markets.length === 0) return [];
           const m = markets[0];
+          const eventTicker = event.event_ticker || '';
+          const seriesTicker = event.series_ticker || '';
+          const eventTitle = event.title || m.title || '';
+
+          // Skip KXMVE parlay markets (ugly auto-generated names)
+          if (isKxmveParlay(eventTicker, eventTitle)) return [];
+
           const price = (m.last_price || m.yes_bid || 50) / 100;
           const vol = m.volume || 0;
           if (vol === 0) return [];
           const shares = Math.floor(Math.random() * 50) + 5;
           const notional = price * shares;
 
-          const kalshiTicker = m.ticker || event.event_ticker || '';
-          const kalshiSeries = event.series_ticker || kalshiTicker.split('-')[0] || '';
-          const kalshiExternalUrl = kalshiSeries
-            ? `https://kalshi.com/markets/${kalshiSeries.toLowerCase()}/${kalshiTicker.toLowerCase()}`
-            : `https://kalshi.com/markets/${kalshiTicker.toLowerCase()}`;
+          // Build URL using event_ticker (not market ticker)
+          const kalshiSlug = seriesTicker
+            ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
+            : eventTicker.toLowerCase();
+          const kalshiExternalUrl = `https://kalshi.com/markets/${kalshiSlug}`;
 
           return [{
             id: `kalshi-${baseTs}-${eIdx}`,
             provider: 'Kalshi' as const,
             type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
-            marketId: kalshiTicker,
-            marketName: event.title || m.title || 'Unknown Kalshi Market',
+            marketId: eventTicker,
+            marketName: eventTitle || 'Unknown Kalshi Market',
             side: Math.random() > 0.5 ? 'Yes' as const : 'No' as const,
             price,
             priceCents: `${(price * 100).toFixed(1)}¢`,
@@ -371,37 +419,40 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
     const data = await res.json();
     const trades = data.trades || [];
 
-    // Resolve tickers → market names using our cached market data
-    await ensureMarketNameMap();
+    // Resolve tickers → market names + URLs using our cached market data
+    await ensureMarketInfoMap();
 
-    return trades.slice(0, 50).map((t: any, idx: number) => {
-      const price = (t.yes_price || t.no_price || t.price || 50) / 100;
-      const shares = t.count || t.size || 1;
-      const notional = price * shares;
-      const ticker = t.ticker || t.market_ticker || '';
-      const resolvedName = resolveMarketName(ticker, t.market_title || t.title || ticker || `Kalshi Trade`);
-      const kalshiPrefix = ticker.split('-')[0] || '';
-      const kalshiExternalUrl = kalshiPrefix
-        ? `https://kalshi.com/markets/${kalshiPrefix.toLowerCase()}/${ticker.toLowerCase()}`
-        : `https://kalshi.com/markets/${ticker.toLowerCase()}`;
+    return trades.slice(0, 50)
+      .filter((t: any) => {
+        // Filter out KXMVE parlay trades
+        const ticker = t.ticker || t.market_ticker || '';
+        return !isKxmveParlay(ticker, t.market_title || t.title || '');
+      })
+      .map((t: any, idx: number) => {
+        const price = (t.yes_price || t.no_price || t.price || 50) / 100;
+        const shares = t.count || t.size || 1;
+        const notional = price * shares;
+        const ticker = t.ticker || t.market_ticker || '';
+        const resolvedName = resolveMarketName(ticker, t.market_title || t.title || ticker || `Kalshi Trade`);
+        const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
 
-      return {
-        id: `kalshi-${t.trade_id || `${Date.now()}-${idx}`}`,
-        provider: 'Kalshi' as const,
-        type: (t.action || 'FILL').toUpperCase() as TerminalTrade['type'],
-        marketId: ticker || `kalshi-${idx}`,
-        marketName: resolvedName,
-        side: (t.side || 'yes').toLowerCase() === 'yes' ? 'Yes' : 'No',
-        price,
-        priceCents: `${(price * 100).toFixed(1)}¢`,
-        shares,
-        notional,
-        fee: parseFloat(t.fee || '0') || Math.round(notional * 0.07 * 100) / 100,
-        timestamp: t.created_time || t.executed_at || new Date().toISOString(),
-        isWhale: notional >= WHALE_THRESHOLD,
-        externalUrl: kalshiExternalUrl,
-      };
-    });
+        return {
+          id: `kalshi-${t.trade_id || `${Date.now()}-${idx}`}`,
+          provider: 'Kalshi' as const,
+          type: (t.action || 'FILL').toUpperCase() as TerminalTrade['type'],
+          marketId: ticker || `kalshi-${idx}`,
+          marketName: resolvedName,
+          side: (t.side || 'yes').toLowerCase() === 'yes' ? 'Yes' : 'No',
+          price,
+          priceCents: `${(price * 100).toFixed(1)}¢`,
+          shares,
+          notional,
+          fee: parseFloat(t.fee || '0') || Math.round(notional * 0.07 * 100) / 100,
+          timestamp: t.created_time || t.executed_at || new Date().toISOString(),
+          isWhale: notional >= WHALE_THRESHOLD,
+          externalUrl,
+        };
+      });
   } catch (err) {
     console.warn('[Terminal] Kalshi trades fetch error:', err);
     kalshiConnected = false;
@@ -552,8 +603,8 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     };
   }
 
-  // Pre-warm market name map so Kalshi tickers resolve to real names
-  await ensureMarketNameMap();
+  // Pre-warm market info map so tickers resolve to names + URLs
+  await ensureMarketInfoMap();
 
   // Fetch fresh data from both providers in parallel
   const [polyTrades, kalshiTrades, ticks] = await Promise.all([
