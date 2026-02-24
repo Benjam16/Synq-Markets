@@ -26,48 +26,150 @@ interface MarketInfo {
 
 let _marketInfoMap: Map<string, MarketInfo> = new Map();
 let _marketInfoMapAge = 0;
-const MARKET_INFO_MAP_TTL = 60_000; // 60 seconds
+const MARKET_INFO_MAP_TTL = 120_000; // 2 minutes (direct API calls are heavier)
 
+/**
+ * Build the market info map by calling Kalshi & Polymarket APIs DIRECTLY,
+ * avoiding self-referential API calls that fail on Vercel serverless.
+ * 
+ * Indexes BOTH event-level tickers AND individual market tickers so that
+ * trades coming from the Kalshi trades API (which return market-level tickers
+ * like "KXATPCHALLENGERMATCH-26FEB24SIMLEO-SIM") can be resolved.
+ */
 async function ensureMarketInfoMap(): Promise<void> {
   const now = Date.now();
   if (_marketInfoMap.size > 0 && (now - _marketInfoMapAge) < MARKET_INFO_MAP_TTL) return;
 
+  const m = new Map<string, MarketInfo>();
+
+  // ── 1. Fetch Kalshi events directly (with nested markets for ticker mapping) ──
   try {
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/markets?limit=5000`,
+    const accessKey = process.env.KALSHI_ACCESS_KEY;
+    const privateKey = process.env.KALSHI_PRIVATE_KEY;
+    if (accessKey && privateKey) {
+      let cursor: string | undefined;
+      let pagesFetched = 0;
+      const MAX_PAGES = 5; // Cap at 5 pages (1000 events) to avoid slowdown
+
+      while (pagesFetched < MAX_PAGES) {
+        const path = '/trade-api/v2/events';
+        const params = new URLSearchParams({
+          status: 'open',
+          limit: '200',
+          with_nested_markets: 'true',
+        });
+        if (cursor) params.set('cursor', cursor);
+        const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
+
+        const res = await fetch(`${KALSHI_API_BASE}${path}?${params}`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', ...authHeaders },
+          cache: 'no-store',
+        });
+
+        if (!res.ok) break;
+        const data = await res.json();
+        const events: any[] = data.events || [];
+        if (events.length === 0) break;
+
+        for (const event of events) {
+          const title = event.title || '';
+          if (!title) continue;
+          const eventTicker = event.event_ticker || '';
+          const seriesTicker = event.series_ticker || '';
+
+          // Build Kalshi URL
+          const kalshiSlug = seriesTicker
+            ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
+            : eventTicker.toLowerCase();
+          const info: MarketInfo = {
+            name: title,
+            externalUrl: `https://kalshi.com/markets/${kalshiSlug}`,
+            category: event.category || 'General',
+          };
+
+          // Index by event ticker (e.g. "kxatpchallengermatch")
+          if (eventTicker) m.set(eventTicker.toLowerCase(), info);
+          // Index by series ticker
+          if (seriesTicker) m.set(seriesTicker.toLowerCase(), info);
+
+          // Index by EACH nested market ticker (what the trades API returns)
+          // e.g. "KXATPCHALLENGERMATCH-26FEB24SIMLEO-SIM"
+          for (const mkt of (event.markets || [])) {
+            if (mkt.ticker) m.set(mkt.ticker.toLowerCase(), info);
+          }
+        }
+
+        pagesFetched++;
+        cursor = data.cursor;
+        if (!cursor) break;
+        // Small delay between pages
+        await new Promise(r => setTimeout(r, 50));
+      }
+      console.log(`[Terminal] Kalshi name map: ${m.size} entries from ${pagesFetched} pages`);
+    }
+  } catch (err) {
+    console.warn('[Terminal] Failed to build Kalshi name map:', err);
+  }
+
+  // ── 2. Fetch Polymarket events directly ──
+  try {
+    const polyRes = await fetch(
+      'https://gamma-api.polymarket.com/events?active=true&closed=false&limit=200&order=volume&ascending=false',
       { cache: 'no-store' },
     );
-    if (!res.ok) return;
-    const data = await res.json();
-    const markets = data.markets || [];
-    const m = new Map<string, MarketInfo>();
-    for (const mkt of markets) {
-      const name = mkt.eventTitle || mkt.name || '';
-      if (!name) continue;
-      const info: MarketInfo = {
-        name,
-        externalUrl: mkt.kalshiUrl || mkt.polymarketUrl || '',
-        category: mkt.category || 'General',
-      };
-      // Map by id, slug, and conditionId so any ticker format can match
-      if (mkt.id) m.set(mkt.id.toLowerCase(), info);
-      if (mkt.slug) m.set(mkt.slug.toLowerCase(), info);
-      if (mkt.conditionId) m.set(mkt.conditionId.toLowerCase(), info);
+    if (polyRes.ok) {
+      const events = await polyRes.json();
+      let polyCount = 0;
+      for (const event of events) {
+        const name = event.title || '';
+        if (!name) continue;
+        const info: MarketInfo = {
+          name,
+          externalUrl: event.slug ? `https://polymarket.com/event/${event.slug}` : 'https://polymarket.com',
+          category: 'General',
+        };
+        if (event.id) m.set(event.id.toString().toLowerCase(), info);
+        if (event.slug) m.set(event.slug.toLowerCase(), info);
+        // Index by each market's condition_id (what the CLOB trades API returns)
+        for (const mkt of (event.markets || [])) {
+          if (mkt.conditionId) m.set(mkt.conditionId.toLowerCase(), info);
+          if (mkt.id) m.set(mkt.id.toString().toLowerCase(), info);
+        }
+        polyCount++;
+      }
+      console.log(`[Terminal] Polymarket name map: ${polyCount} events added`);
     }
+  } catch (err) {
+    console.warn('[Terminal] Failed to build Polymarket name map:', err);
+  }
+
+  if (m.size > 0) {
     _marketInfoMap = m;
     _marketInfoMapAge = now;
-  } catch { /* keep stale map */ }
+    console.log(`[Terminal] Market info map total: ${m.size} entries`);
+  }
 }
 
 function resolveMarketInfo(ticker: string): MarketInfo | null {
   if (!ticker) return null;
   const key = ticker.toLowerCase();
-  // Exact match
+
+  // 1. Exact match (fastest — works for individual market tickers indexed above)
   if (_marketInfoMap.has(key)) return _marketInfoMap.get(key)!;
-  // Prefix match (kalshi tickers like "KXBTC-25FEB28" → "KXBTC")
+
+  // 2. Prefix match: trade ticker "kxatp-26feb24sim-x" → event ticker "kxatp"
+  //    Only check keys that are shorter than the query (event tickers are shorter)
+  let bestMatch: MarketInfo | null = null;
+  let bestLen = 0;
   for (const [k, v] of _marketInfoMap.entries()) {
-    if (key.startsWith(k) || k.startsWith(key)) return v;
+    if (key.startsWith(k) && k.length > bestLen) {
+      bestMatch = v;
+      bestLen = k.length;
+    }
   }
+  if (bestMatch) return bestMatch;
+
   return null;
 }
 
@@ -83,22 +185,23 @@ function resolveExternalUrl(ticker: string, provider: 'Polymarket' | 'Kalshi', f
 
   // Fallback: construct URL from event ticker
   if (provider === 'Kalshi') {
-    // Use the event ticker (not the market ticker with date suffixes)
     const eventTicker = fallbackEventTicker || ticker;
-    // Extract just the series part (before first '-') for the series path
-    const seriesPart = eventTicker.split('-')[0] || eventTicker;
-    // Kalshi URL: /markets/{event_ticker_lowercase} 
     return `https://kalshi.com/markets/${eventTicker.toLowerCase()}`;
   }
   return `https://polymarket.com`;
 }
 
-// KXMVE parlay filter — these are auto-generated sports parlays with ugly names
-function isKxmveParlay(ticker: string, name: string): boolean {
+// Filter for ugly auto-generated markets that users wouldn't understand
+function isUglyTicker(ticker: string, name: string): boolean {
   if (!ticker && !name) return false;
   const t = (ticker || '').toUpperCase();
   const n = (name || '').toUpperCase();
-  return t.startsWith('KXMVE') || n.includes('KXMVESPORTS');
+  // KXMVE = sports multi-game parlays
+  if (t.startsWith('KXMVE')) return true;
+  if (n.includes('KXMVESPORTS')) return true;
+  // If the resolved name still looks like a raw ticker (all caps with dashes), hide it
+  if (name && /^KX[A-Z0-9]+-[A-Z0-9]+/.test(name)) return true;
+  return false;
 }
 
 // ============================================================================
@@ -377,7 +480,7 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           const eventTitle = event.title || m.title || '';
 
           // Skip KXMVE parlay markets (ugly auto-generated names)
-          if (isKxmveParlay(eventTicker, eventTitle)) return [];
+          if (isUglyTicker(eventTicker, eventTitle)) return [];
 
           const price = (m.last_price || m.yes_bid || 50) / 100;
           const vol = m.volume || 0;
@@ -422,11 +525,11 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
     // Resolve tickers → market names + URLs using our cached market data
     await ensureMarketInfoMap();
 
-    return trades.slice(0, 50)
+    return trades.slice(0, 80)
       .filter((t: any) => {
-        // Filter out KXMVE parlay trades
+        // Filter out KXMVE parlay trades and other ugly tickers
         const ticker = t.ticker || t.market_ticker || '';
-        return !isKxmveParlay(ticker, t.market_title || t.title || '');
+        return !isUglyTicker(ticker, t.market_title || t.title || '');
       })
       .map((t: any, idx: number) => {
         const price = (t.yes_price || t.no_price || t.price || 50) / 100;
@@ -452,7 +555,9 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           isWhale: notional >= WHALE_THRESHOLD,
           externalUrl,
         };
-      });
+      })
+      // Post-map filter: remove trades whose name STILL looks like a raw ticker
+      .filter((trade: any) => !isUglyTicker(trade.marketId, trade.marketName));
   } catch (err) {
     console.warn('[Terminal] Kalshi trades fetch error:', err);
     kalshiConnected = false;

@@ -410,7 +410,11 @@ function DashboardContent() {
                 change: m.change ?? 0,
                 asOf: m.asOf,
                 resolutionDate: m.resolutionDate,
-                imageUrl: m.imageUrl || (isKalshi ? '' : 'https://polymarket.com/favicon.ico'),
+                imageUrl: m.imageUrl || (isKalshi
+                  ? ((m.conditionId || m.id || '').replace(/^kalshi-/i, '').split('-')[0]
+                    ? `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${(m.conditionId || m.id || '').replace(/^kalshi-/i, '').split('-')[0].toUpperCase()}.webp`
+                    : '')
+                  : 'https://polymarket.com/favicon.ico'),
                 polymarketUrl: isKalshi ? '' : (m.polymarketUrl || `https://polymarket.com/event/${m.slug || m.id}`),
                 kalshiUrl: m.kalshiUrl || '',
                 slug: m.slug || m.id,
@@ -748,7 +752,11 @@ function DashboardContent() {
                 change: m.change ?? 0,
                 asOf: m.asOf,
                 resolutionDate: m.resolutionDate,
-                imageUrl: m.imageUrl || (isKalshi ? '' : 'https://polymarket.com/favicon.ico'),
+                imageUrl: m.imageUrl || (isKalshi
+                  ? ((m.conditionId || m.id || '').replace(/^kalshi-/i, '').split('-')[0]
+                    ? `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${(m.conditionId || m.id || '').replace(/^kalshi-/i, '').split('-')[0].toUpperCase()}.webp`
+                    : '')
+                  : 'https://polymarket.com/favicon.ico'),
                 polymarketUrl: isKalshi ? '' : (m.polymarketUrl || `https://polymarket.com/event/${m.slug || m.id}`),
                 kalshiUrl: m.kalshiUrl || '',
                 slug: m.slug || m.id,
