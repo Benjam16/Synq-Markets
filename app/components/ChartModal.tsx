@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  X, TrendingUp, TrendingDown, BarChart3, DollarSign,
-  ExternalLink, Copy, Zap, ArrowRight, ArrowDown, ArrowUp, Bell,
+  X, BarChart3,
+  ExternalLink, Zap,
 } from 'lucide-react';
 import { createChart, ColorType, CandlestickSeries, LineSeries } from 'lightweight-charts';
 import type { IChartApi } from 'lightweight-charts';
@@ -51,6 +51,17 @@ interface ChartModalProps {
   instantTradeShares?: number;
 }
 
+// Seeded random for deterministic chart data
+function seededRandom(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 16807 + 0) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+type TimeRange = '1H' | '4H' | '1D' | '1W' | '1M';
+
 // ============================================================================
 // CHART MODAL COMPONENT
 // ============================================================================
@@ -70,6 +81,7 @@ export default function ChartModal({
   const [tradeQuantity, setTradeQuantity] = useState(100);
   const [activeTab, setActiveTab] = useState<'chart' | 'book' | 'trades'>('chart');
   const [imgError, setImgError] = useState(false);
+  const [timeRange, setTimeRange] = useState<TimeRange>('1D');
 
   // Get all trades for this specific market
   const marketTrades = useMemo(() => {
@@ -82,24 +94,39 @@ export default function ChartModal({
       .slice(0, 100);
   }, [allTrades, trade.marketName, trade.marketId]);
 
-  // Generate candlestick data from price history
+  // Generate STABLE candlestick data using seeded random (won't change on re-renders)
   const candlestickData = useMemo(() => {
     const sorted = [...marketTrades].reverse();
     const now = Date.now();
 
+    // Time range config
+    const rangeConfig: Record<TimeRange, { candles: number; intervalMs: number }> = {
+      '1H':  { candles: 30, intervalMs: 120_000 },     // 2-min candles
+      '4H':  { candles: 48, intervalMs: 300_000 },     // 5-min candles
+      '1D':  { candles: 48, intervalMs: 1_800_000 },   // 30-min candles
+      '1W':  { candles: 42, intervalMs: 14_400_000 },  // 4-hour candles
+      '1M':  { candles: 30, intervalMs: 86_400_000 },  // 1-day candles
+    };
+    const cfg = rangeConfig[timeRange];
+
     if (sorted.length < 2) {
-      // Generate synthetic candlestick data centered around current price
+      // Generate deterministic synthetic candles using seeded random
+      const seed = trade.marketId
+        ? trade.marketId.split('').reduce((s, c) => s + c.charCodeAt(0), 0) + timeRange.charCodeAt(0)
+        : 42 + timeRange.charCodeAt(0);
+      const rng = seededRandom(seed);
+
       const candles: { time: number; open: number; high: number; low: number; close: number }[] = [];
       let p = trade.price * 100;
-      for (let i = 48; i >= 0; i--) {
+      for (let i = cfg.candles; i >= 0; i--) {
         const open = p;
-        const movement = (Math.random() - 0.48) * 3;
+        const movement = (rng() - 0.48) * 3;
         p = Math.max(1, Math.min(99, p + movement));
         const close = p;
-        const high = Math.max(open, close) + Math.random() * 1.5;
-        const low = Math.min(open, close) - Math.random() * 1.5;
+        const high = Math.max(open, close) + rng() * 1.5;
+        const low = Math.min(open, close) - rng() * 1.5;
         candles.push({
-          time: Math.floor((now - i * 1800000) / 1000), // 30min intervals
+          time: Math.floor((now - i * cfg.intervalMs) / 1000),
           open: Math.round(open * 10) / 10,
           high: Math.round(Math.min(99, high) * 10) / 10,
           low: Math.round(Math.max(1, low) * 10) / 10,
@@ -113,11 +140,14 @@ export default function ChartModal({
       return candles;
     }
 
-    // Build candles from real trade data — aggregate into 5min buckets
-    const bucketMs = 300000; // 5 minutes
+    // Build candles from real trade data
+    const rangeStart = now - cfg.candles * cfg.intervalMs;
+    const inRange = sorted.filter(t => new Date(t.timestamp).getTime() >= rangeStart);
+    const tradesForCandles = inRange.length > 2 ? inRange : sorted;
+
     const buckets = new Map<number, number[]>();
-    for (const t of sorted) {
-      const ts = Math.floor(new Date(t.timestamp).getTime() / bucketMs) * bucketMs;
+    for (const t of tradesForCandles) {
+      const ts = Math.floor(new Date(t.timestamp).getTime() / cfg.intervalMs) * cfg.intervalMs;
       if (!buckets.has(ts)) buckets.set(ts, []);
       buckets.get(ts)!.push(t.price * 100);
     }
@@ -131,7 +161,7 @@ export default function ChartModal({
         high: Math.max(...prices),
         low: Math.min(...prices),
       }));
-  }, [marketTrades, trade.price]);
+  }, [marketTrades, trade.price, trade.marketId, timeRange]);
 
   // Fetch REAL order book data
   const [orderBook, setOrderBook] = useState<{ bids: OrderBookEntry[]; asks: OrderBookEntry[] }>({ bids: [], asks: [] });
@@ -178,15 +208,17 @@ export default function ChartModal({
           }
         }
 
-        // Fallback: synthetic
+        // Fallback: synthetic using seeded random
+        const seed = (trade.marketId || 'x').charCodeAt(0) * 137;
+        const rng = seededRandom(seed);
         const yp = trade.price * 100;
         const bids: OrderBookEntry[] = [], asks: OrderBookEntry[] = [];
         let bt = 0, at = 0;
         for (let i = 0; i < 12; i++) {
-          const bs = Math.floor(Math.random() * 5000) + 500;
+          const bs = Math.floor(rng() * 5000) + 500;
           bt += bs;
           bids.push({ price: Math.max(1, yp - (i + 1)), size: bs, total: bt });
-          const as2 = Math.floor(Math.random() * 5000) + 500;
+          const as2 = Math.floor(rng() * 5000) + 500;
           at += as2;
           asks.push({ price: Math.min(99, yp + (i + 1)), size: as2, total: at });
         }
@@ -197,10 +229,10 @@ export default function ChartModal({
         const bids: OrderBookEntry[] = [], asks: OrderBookEntry[] = [];
         let bt = 0, at = 0;
         for (let i = 0; i < 12; i++) {
-          bt += Math.floor(Math.random() * 3000) + 500;
-          bids.push({ price: Math.max(1, yp - (i + 1)), size: bt - (bids[i - 1]?.total || 0), total: bt });
-          at += Math.floor(Math.random() * 3000) + 500;
-          asks.push({ price: Math.min(99, yp + (i + 1)), size: at - (asks[i - 1]?.total || 0), total: at });
+          bt += 1500 + i * 300;
+          bids.push({ price: Math.max(1, yp - (i + 1)), size: 1500 + i * 300, total: bt });
+          at += 1500 + i * 300;
+          asks.push({ price: Math.min(99, yp + (i + 1)), size: 1500 + i * 300, total: at });
         }
         if (!cancelled) setOrderBook({ bids, asks });
       }
@@ -208,7 +240,7 @@ export default function ChartModal({
     }
 
     fetchOrderBook();
-    const interval = setInterval(fetchOrderBook, 5000);
+    const interval = setInterval(fetchOrderBook, 8000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [isOpen, trade.provider, trade.marketId, trade.price]);
 
@@ -233,7 +265,7 @@ export default function ChartModal({
         horzLines: { color: 'rgba(255,255,255,0.03)' },
       },
       width: container.clientWidth,
-      height: 300,
+      height: 280,
       timeScale: {
         borderColor: 'rgba(255,255,255,0.06)',
         timeVisible: true,
@@ -268,7 +300,7 @@ export default function ChartModal({
       candleSeries.setData(sorted);
     }
 
-    // Also add a moving average line
+    // Moving average line
     if (sorted.length >= 5) {
       const maLine = chart.addSeries(LineSeries, {
         color: 'rgba(123, 97, 255, 0.5)',
@@ -312,9 +344,9 @@ export default function ChartModal({
     1
   );
 
-  const tradeCost = (tradeSide === 'yes' ? trade.price : 1 - trade.price) * tradeQuantity;
-
   if (!isOpen) return null;
+
+  const timeRanges: TimeRange[] = ['1H', '4H', '1D', '1W', '1M'];
 
   return (
     <AnimatePresence>
@@ -335,7 +367,6 @@ export default function ChartModal({
         >
           {/* ── Header ── */}
           <div className="flex items-center gap-3 px-5 py-3 border-b border-white/[0.06]">
-            {/* Market Image */}
             {trade.imageUrl && !imgError ? (
               <div className="w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 border border-white/[0.06]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -406,14 +437,13 @@ export default function ChartModal({
                     }`}
                   >
                     {tab === 'chart' ? (
-                      <>📊 Candlestick</>
+                      <>📊 Chart</>
                     ) : tab === 'book' ? (
                       <>📋 Order Book {!bookLoading && <span className="w-1.5 h-1.5 rounded-full bg-[#4FFFC8] animate-pulse" />}</>
                     ) : '📈 Trades'}
                   </button>
                 ))}
 
-                {/* External link in tab bar */}
                 {trade.externalUrl && (
                   <a
                     href={trade.externalUrl}
@@ -429,8 +459,37 @@ export default function ChartModal({
 
               {/* Chart View — Candlestick */}
               {activeTab === 'chart' && (
-                <div className="flex-1 flex flex-col p-3 gap-3">
-                  <div ref={chartContainerRef} className="w-full h-[300px] rounded-lg overflow-hidden" />
+                <div className="flex-1 flex flex-col p-3 gap-2">
+                  {/* Time range selector */}
+                  <div className="flex items-center gap-1">
+                    {timeRanges.map(range => (
+                      <button
+                        key={range}
+                        onClick={() => setTimeRange(range)}
+                        className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all ${
+                          timeRange === range
+                            ? 'bg-[#4FFFC8]/15 text-[#4FFFC8] border border-[#4FFFC8]/20'
+                            : 'text-slate-500 hover:text-white hover:bg-white/[0.03]'
+                        }`}
+                      >
+                        {range}
+                      </button>
+                    ))}
+                    <div className="ml-auto flex items-center gap-2 text-[10px]">
+                      <span className="flex items-center gap-1 text-[#4FFFC8]">
+                        <span className="inline-block w-3 h-2 bg-[#4FFFC8] rounded-sm" /> Up
+                      </span>
+                      <span className="flex items-center gap-1 text-red-400">
+                        <span className="inline-block w-3 h-2 bg-red-400 rounded-sm" /> Down
+                      </span>
+                      <span className="flex items-center gap-1 text-[#7B61FF]/70">
+                        <span className="inline-block w-3 h-0.5 bg-[#7B61FF]/50" /> MA(5)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div ref={chartContainerRef} className="w-full h-[280px] rounded-lg overflow-hidden" />
+
                   {/* Stats row */}
                   <div className="grid grid-cols-4 gap-2">
                     {[
@@ -467,7 +526,7 @@ export default function ChartModal({
                   <>
                     <div className="flex items-center justify-between mb-2 px-2">
                       <span className="text-[9px] text-slate-600 uppercase tracking-wider">
-                        {trade.provider === 'Polymarket' ? 'POLYMARKET CLOB' : trade.provider === 'Kalshi' ? 'KALSHI' : 'SIMULATED'} ORDER BOOK
+                        {trade.provider} ORDER BOOK
                       </span>
                       {!bookLoading && (
                         <span className="flex items-center gap-1 text-[9px] text-[#4FFFC8]">
@@ -477,7 +536,7 @@ export default function ChartModal({
                       )}
                     </div>
 
-                    {/* Asks (reversed so best ask at bottom near spread) */}
+                    {/* Asks */}
                     <div className="mb-1">
                       <div className="grid grid-cols-3 text-[9px] text-slate-500 uppercase tracking-wider px-2 py-1">
                         <span>Price (¢)</span>
@@ -497,7 +556,7 @@ export default function ChartModal({
                       ))}
                     </div>
 
-                    {/* Spread line */}
+                    {/* Spread */}
                     <div className="flex items-center justify-center py-1.5 border-y border-white/[0.04]">
                       <span className="text-sm font-mono font-bold text-[#4FFFC8]">{yesPrice.toFixed(1)}¢</span>
                       {orderBook.bids[0] && orderBook.asks[0] && (
@@ -542,12 +601,8 @@ export default function ChartModal({
                   ) : (
                     marketTrades.map((t) => (
                       <div key={t.id} className="grid grid-cols-6 text-xs font-mono px-3 py-1.5 border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
-                        <span className={t.side === 'Yes' ? 'text-[#4FFFC8]' : 'text-red-400'}>
-                          {t.side}
-                        </span>
-                        <span className={t.type === 'BUY' || t.type === 'FILL' ? 'text-[#4FFFC8]' : 'text-red-400'}>
-                          {t.type}
-                        </span>
+                        <span className={t.side === 'Yes' ? 'text-[#4FFFC8]' : 'text-red-400'}>{t.side}</span>
+                        <span className={t.type === 'BUY' || t.type === 'FILL' ? 'text-[#4FFFC8]' : 'text-red-400'}>{t.type}</span>
                         <span className="text-right text-white">{t.priceCents}</span>
                         <span className="text-right text-slate-300">{t.shares}</span>
                         <span className="text-right text-white">${t.notional.toFixed(0)}</span>
@@ -568,9 +623,7 @@ export default function ChartModal({
                 <button
                   onClick={() => setTradeSide('yes')}
                   className={`py-3 text-sm font-bold transition-all relative ${
-                    tradeSide === 'yes'
-                      ? 'text-[#4FFFC8]'
-                      : 'text-slate-500 hover:text-white'
+                    tradeSide === 'yes' ? 'text-[#4FFFC8]' : 'text-slate-500 hover:text-white'
                   }`}
                 >
                   Buy Yes {yesPrice.toFixed(0)}¢
@@ -579,9 +632,7 @@ export default function ChartModal({
                 <button
                   onClick={() => setTradeSide('no')}
                   className={`py-3 text-sm font-bold transition-all relative ${
-                    tradeSide === 'no'
-                      ? 'text-red-400'
-                      : 'text-slate-500 hover:text-white'
+                    tradeSide === 'no' ? 'text-red-400' : 'text-slate-500 hover:text-white'
                   }`}
                 >
                   Buy No {noPrice.toFixed(0)}¢
@@ -599,7 +650,6 @@ export default function ChartModal({
                     onChange={(e) => setTradeQuantity(Math.max(1, parseInt(e.target.value) || 1))}
                     className="w-full px-3 py-2.5 bg-white/[0.03] rounded-lg text-white text-base font-mono border border-white/[0.06] focus:border-[#4FFFC8]/30 focus:ring-0 outline-none transition-colors"
                   />
-                  {/* Quick amounts */}
                   <div className="flex gap-1.5 mt-2">
                     {['+$1', '+$20', '+$100', 'Max'].map((label, i) => {
                       const amounts = [1, 20, 100, 1000];
@@ -620,9 +670,7 @@ export default function ChartModal({
                 <div className="p-3 bg-white/[0.02] rounded-lg border border-white/[0.04] space-y-1.5">
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">You&apos;ll receive</span>
-                    <span className="text-white font-mono font-bold">
-                      ${tradeQuantity.toFixed(2)}
-                    </span>
+                    <span className="text-white font-mono font-bold">${tradeQuantity.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">Price per Share</span>
@@ -651,7 +699,6 @@ export default function ChartModal({
                   Buy
                 </button>
 
-                {/* Instant Trade */}
                 {onInstantTrade && (
                   <button
                     onClick={() => {
@@ -664,7 +711,7 @@ export default function ChartModal({
                     className="w-full py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-400 font-bold text-xs flex items-center justify-center gap-2 hover:bg-amber-500/10 transition-all"
                   >
                     <Zap className="w-3.5 h-3.5" />
-                    ⚡ Instant ({instantTradeShares} shares)
+                    Instant ({instantTradeShares} shares)
                   </button>
                 )}
               </div>

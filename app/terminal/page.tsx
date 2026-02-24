@@ -488,10 +488,70 @@ export default function TerminalPage() {
   }, [user, getUserId, instantTradeShares, buildMarketFromTrade, playClick]);
 
   // ── Open Trade Panel (expand button — full trade UI) ──
-  const openTradePanel = useCallback((trade: TerminalTrade | WhaleAlert) => {
-    const market = buildMarketFromTrade(trade);
-    setQuickTradeMarket(market);
+  // Fetches the REAL market data from /api/markets so the panel shows full
+  // outcomes, images, charts — matching the Markets page card exactly.
+  const [quickTradeEventMarkets, setQuickTradeEventMarkets] = useState<Market[]>([]);
+  const [quickTradeEventTitle, setQuickTradeEventTitle] = useState<string>('');
+
+  const openTradePanel = useCallback(async (trade: TerminalTrade | WhaleAlert) => {
+    // 1) Build a lightweight fallback immediately so the panel opens fast
+    const fallback = buildMarketFromTrade(trade);
+    setQuickTradeMarket(fallback);
+    setQuickTradeEventMarkets([]);
+    setQuickTradeEventTitle(trade.marketName);
     setIsQuickTradeOpen(true);
+
+    // 2) In background, try to fetch the real market from API
+    try {
+      const res = await fetch('/api/markets?limit=5000');
+      if (res.ok) {
+        const { markets } = await res.json();
+        // Find markets matching this trade's event/market
+        const tradeName = trade.marketName.toLowerCase();
+        const tradeId = trade.marketId?.toLowerCase() || '';
+
+        // Try exact conditionId match first
+        let matched = (markets as Market[]).filter((m: Market) =>
+          m.conditionId?.toLowerCase() === tradeId ||
+          m.id?.toLowerCase() === tradeId
+        );
+
+        // If no ID match, try name match (event title or market name)
+        if (matched.length === 0) {
+          matched = (markets as Market[]).filter((m: Market) =>
+            m.eventTitle?.toLowerCase() === tradeName ||
+            m.name?.toLowerCase() === tradeName ||
+            m.eventTitle?.toLowerCase().includes(tradeName) ||
+            tradeName.includes(m.eventTitle?.toLowerCase() || '___')
+          );
+        }
+
+        // If still no match, try fuzzy: first 30 chars
+        if (matched.length === 0 && tradeName.length > 15) {
+          const prefix = tradeName.slice(0, 30);
+          matched = (markets as Market[]).filter((m: Market) =>
+            m.eventTitle?.toLowerCase().startsWith(prefix) ||
+            m.name?.toLowerCase().startsWith(prefix)
+          );
+        }
+
+        if (matched.length > 0) {
+          // Group by eventTitle — show all markets for this event
+          const eventTitle = matched[0].eventTitle || matched[0].name;
+          const eventMarkets = (markets as Market[]).filter((m: Market) =>
+            m.eventTitle === eventTitle
+          );
+          const finalMarkets = eventMarkets.length > 0 ? eventMarkets : matched;
+
+          setQuickTradeMarket(finalMarkets[0]);
+          setQuickTradeEventMarkets(finalMarkets);
+          setQuickTradeEventTitle(eventTitle || trade.marketName);
+        }
+      }
+    } catch (err) {
+      // Silently fail — the fallback market is already showing
+      console.warn('[Terminal] Failed to fetch full market data for expand:', err);
+    }
   }, [buildMarketFromTrade]);
 
   // ── Open Chart Modal (TradingView-style view with order book + trading) ──
@@ -1807,6 +1867,8 @@ export default function TerminalPage() {
       {isQuickTradeOpen && quickTradeMarket && (
         <TradePanel
           market={quickTradeMarket}
+          eventMarkets={quickTradeEventMarkets.length > 0 ? quickTradeEventMarkets : undefined}
+          eventTitle={quickTradeEventTitle || undefined}
           isOpen={isQuickTradeOpen}
           onClose={() => setIsQuickTradeOpen(false)}
           onTrade={(market, side, quantity) => {
