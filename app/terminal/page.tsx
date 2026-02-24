@@ -599,7 +599,15 @@ export default function TerminalPage() {
           if (newCount > 0) playClick();
         }
 
-        setTrades(data.trades || []);
+        // Accumulate trades — new ones go to the top, old ones scroll down, cap at 300
+        setTrades(prev => {
+          const incoming: TerminalTrade[] = data.trades || [];
+          if (prev.length === 0) return incoming.slice(0, 300);
+          const existingIds = new Set(prev.map(t => t.id));
+          const brandNew = incoming.filter(t => !existingIds.has(t.id));
+          if (brandNew.length === 0) return prev;
+          return [...brandNew, ...prev].slice(0, 300);
+        });
 
         // ── Deduplicate whale alerts ──
         const incomingWhales: WhaleAlert[] = data.whaleAlerts || [];

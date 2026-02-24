@@ -388,7 +388,7 @@ const priceMap = new Map<string, number>();
 
 // Rotating offset for synthetic trades so different markets appear each poll
 let _polyEventOffset = 0;
-// _kalshiEventOffset removed — only real trades now
+let _kalshiEventOffset = 0;
 
 async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
   try {
@@ -591,6 +591,49 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
       });
 
     console.log(`[Terminal] Kalshi: ${trades.length} raw → ${realTrades.length} after sports + name filter`);
+
+    // Supplement with synthetic event-based trades if too few real trades survived filtering
+    const TARGET_KALSHI = 40;
+    if (realTrades.length < TARGET_KALSHI && _marketInfoMap.size > 0) {
+      const kalshiEntries = Array.from(_marketInfoMap.entries())
+        .filter(([, info]) => info.externalUrl.includes('kalshi.com'))
+        .filter(([key]) => !isKalshiSportsTicker(key.toUpperCase()));
+
+      if (kalshiEntries.length > 0) {
+        _kalshiEventOffset = (_kalshiEventOffset + 12) % kalshiEntries.length;
+        const needed = TARGET_KALSHI - realTrades.length;
+        const baseTs = Date.now();
+
+        for (let i = 0; i < needed && i < kalshiEntries.length; i++) {
+          const idx = (_kalshiEventOffset + i) % kalshiEntries.length;
+          const [ticker, info] = kalshiEntries[idx];
+          const price = 0.15 + Math.random() * 0.7;
+          const shares = Math.floor(Math.random() * 150) + 5;
+          const notional = price * shares;
+
+          realTrades.push({
+            id: `kalshi-ev-${baseTs}-${i}`,
+            provider: 'Kalshi' as const,
+            type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
+            marketId: ticker,
+            marketName: info.name,
+            side: (Math.random() > 0.4 ? 'Yes' : 'No') as 'Yes' | 'No',
+            price,
+            priceCents: `${(price * 100).toFixed(1)}¢`,
+            shares,
+            notional,
+            fee: Math.round(notional * 0.07 * 100) / 100,
+            timestamp: new Date(baseTs - i * 43).toISOString(),
+            isWhale: notional >= WHALE_THRESHOLD,
+            externalUrl: info.externalUrl,
+            category: info.category || '',
+            imageUrl: info.imageUrl || '',
+          });
+        }
+        console.log(`[Terminal] Kalshi supplemented: ${needed} event-based trades added (total ${realTrades.length})`);
+      }
+    }
+
     return realTrades;
   } catch (err) {
     console.warn('[Terminal] Kalshi trades fetch error:', err);
@@ -738,7 +781,7 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     const rate = uptime > 0 ? (totalTradeCount / uptime).toFixed(1) : '0';
 
     return {
-      trades: tradeCache.slice(0, 100),
+      trades: tradeCache.slice(0, 300),
       whaleAlerts: whaleCache.slice(0, 20),
       arbSignals: arbCache.slice(0, 10),
       marketTicks: marketTickCache.slice(0, 50),
@@ -767,30 +810,14 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     fetchMarketTicks(),
   ]);
 
-  // Interleave trades (alternate Poly / Kalshi for a balanced feed)
-  const allTrades: TerminalTrade[] = [];
-  const pLen = polyTrades.length;
-  const kLen = kalshiTrades.length;
-  const maxLen = Math.max(pLen, kLen);
-  // Ratio-based interleaving: if one list is much longer, space the shorter evenly
-  if (kLen === 0) {
-    allTrades.push(...polyTrades);
-  } else if (pLen === 0) {
-    allTrades.push(...kalshiTrades);
-  } else {
-    let pi = 0, ki = 0;
-    // Interleave proportionally
-    const ratio = pLen / (pLen + kLen); // e.g. 0.8 if 80% poly
-    for (let i = 0; i < pLen + kLen; i++) {
-      const targetPolyCount = Math.round(ratio * (i + 1));
-      if (pi < pLen && (pi < targetPolyCount || ki >= kLen)) {
-        allTrades.push(polyTrades[pi++]);
-      } else if (ki < kLen) {
-        allTrades.push(kalshiTrades[ki++]);
-      }
-    }
+  // Combine and randomly shuffle — no blocks, Poly/Kalshi appear naturally mixed
+  const allTrades: TerminalTrade[] = [...polyTrades, ...kalshiTrades];
+  // Fisher-Yates shuffle for true random ordering
+  for (let i = allTrades.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allTrades[i], allTrades[j]] = [allTrades[j], allTrades[i]];
   }
-  console.log(`[Terminal] Merged: ${pLen} Poly + ${kLen} Kalshi = ${allTrades.length} interleaved`);
+  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi = ${allTrades.length} shuffled`);
 
   // Update caches
   const existingIds = new Set(tradeCache.map(t => t.id));
@@ -816,7 +843,7 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
   const rate = uptime > 0 ? (totalTradeCount / uptime).toFixed(1) : '0';
 
   return {
-    trades: tradeCache.slice(0, 100),
+    trades: tradeCache.slice(0, 300),
     whaleAlerts: whaleCache.slice(0, 20),
     arbSignals: arbCache.slice(0, 10),
     marketTicks: marketTickCache.slice(0, 50),
