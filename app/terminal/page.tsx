@@ -143,37 +143,37 @@ interface TerminalStats {
 const TUTORIAL_SLIDES = [
   {
     title: 'Live Ticker',
-    icon: '📡',
+    image: '/tutorial/tutorial-live-ticker.png',
     description: 'Watch every trade across Polymarket and Kalshi in real-time. Trades flow in as they happen — BUYs, SELLs, FILLs, and ORDERs from both platforms are merged into a single unified stream.',
     color: '#4FFFC8',
   },
   {
     title: 'Instant Trade ⚡',
-    icon: '⚡',
+    image: '/tutorial/tutorial-instant-trade.png',
     description: 'Hit the lightning bolt on any trade to instantly copy it with your preset share amount. Configure your default shares in the settings gear. One click = trade executed. No confirmation needed.',
     color: '#FBBF24',
   },
   {
     title: 'Whale Alerts 🐋',
-    icon: '🐋',
+    image: '/tutorial/tutorial-whale-alerts.png',
     description: 'Large trades over $5,000 are automatically flagged and appear in the Whale Alerts tab. Follow the smart money — whale movements often signal major market shifts before they happen.',
     color: '#F59E0B',
   },
   {
     title: 'Arbitrage Scanner',
-    icon: '🔀',
+    image: '/tutorial/tutorial-arbitrage-scanner.png',
     description: 'The engine continuously scans both Polymarket and Kalshi for price discrepancies on the same events. When the spread exceeds 3%, an opportunity is flagged with the exact profit potential per $1,000.',
     color: '#7B61FF',
   },
   {
     title: 'Market Scanner',
-    icon: '🔍',
+    image: '/tutorial/tutorial-market-scanner.png',
     description: 'Browse all live markets across both platforms in a sortable table. Filter by provider, category, or search by name. See real-time price changes and volume at a glance.',
     color: '#3B82F6',
   },
   {
     title: 'Activity Heatmap',
-    icon: '🟩',
+    image: '/tutorial/tutorial-activity-heatmap.png',
     description: 'The 60-second heatmap at the top shows trade intensity over the last minute. Brighter bars = more trades. Use it to gauge market activity levels and identify bursts of trading.',
     color: '#4FFFC8',
   },
@@ -687,9 +687,33 @@ export default function TerminalPage() {
               onClick={(e) => e.stopPropagation()}
             >
               {/* Slide content */}
-              <div className="p-8 text-center">
-                <div className="text-5xl mb-4">{TUTORIAL_SLIDES[tutorialSlide].icon}</div>
-                <h2 className="text-2xl font-bold text-white mb-3">
+              <div className="p-6 text-center">
+                {/* Screenshot image */}
+                <div className="relative w-full h-48 mb-5 rounded-lg overflow-hidden border border-[#1A1A1A] bg-black/50">
+                  <img
+                    src={TUTORIAL_SLIDES[tutorialSlide].image}
+                    alt={TUTORIAL_SLIDES[tutorialSlide].title}
+                    className="w-full h-full object-cover object-top"
+                    onError={(e) => {
+                      // Fallback: show a styled placeholder if image not yet added
+                      const target = e.currentTarget;
+                      target.style.display = 'none';
+                      const fallback = target.nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
+                  {/* Fallback placeholder (hidden by default, shown if image fails) */}
+                  <div
+                    className="absolute inset-0 items-center justify-center flex-col gap-2"
+                    style={{ display: 'none', background: `linear-gradient(135deg, ${TUTORIAL_SLIDES[tutorialSlide].color}08, ${TUTORIAL_SLIDES[tutorialSlide].color}15)` }}
+                  >
+                    <div className="text-3xl opacity-40">📷</div>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {TUTORIAL_SLIDES[tutorialSlide].image.split('/').pop()}
+                    </span>
+                  </div>
+                </div>
+                <h2 className="text-xl font-bold text-white mb-2">
                   {TUTORIAL_SLIDES[tutorialSlide].title}
                 </h2>
                 <p className="text-sm text-slate-400 leading-relaxed max-w-md mx-auto">
