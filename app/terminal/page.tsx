@@ -183,9 +183,9 @@ export default function TerminalPage() {
 
   // ── Copy Trade to Clipboard ──
   const copyTrade = useCallback((trade: TerminalTrade | WhaleAlert) => {
-    const tradeText = 'shares' in trade 
-      ? `${trade.provider} ${'type' in trade ? trade.type : 'BUY'} ${trade.side} ${trade.shares} shares @ ${'priceCents' in trade ? trade.priceCents : trade.price} - ${trade.marketName}`
-      : `Trade - ${trade.marketName}`;
+    const typePart = 'type' in trade ? (trade as TerminalTrade).type : 'BUY';
+    const pricePart = 'priceCents' in trade ? (trade as TerminalTrade).priceCents : `${(trade.price * 100).toFixed(1)}¢`;
+    const tradeText = `${trade.provider} ${typePart} ${trade.side} ${trade.shares} shares @ ${pricePart} - ${trade.marketName}`;
     navigator.clipboard.writeText(tradeText).then(() => {
       setCopiedTrade(trade.id);
       setTimeout(() => setCopiedTrade(null), 2000);
