@@ -35,6 +35,7 @@ import {
   Info,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Market } from '@/lib/types';
 import TradePanel from '../components/TradePanel';
 import { useAuth } from '../components/AuthProvider';
@@ -230,6 +231,7 @@ export default function TerminalPage() {
   const seenWhaleIdsRef = useRef<Set<string>>(new Set());
 
   const { user } = useAuth();
+  const router = useRouter();
 
   // ── Load instant trade settings from localStorage ──
   useEffect(() => {
@@ -391,6 +393,8 @@ export default function TerminalPage() {
           outcome: trade.side,
           price: trade.price,
           quantity: instantTradeShares,
+          marketName: trade.marketName,
+          category: ('category' in trade ? (trade as TerminalTrade).category : '') || 'General',
         }),
       });
 
@@ -399,9 +403,35 @@ export default function TerminalPage() {
       if (res.ok && !data.error) {
         setInstantTradeSuccess(tradeId);
         playClick();
-        toast.success(
-          `⚡ Instant: ${instantTradeShares} ${trade.side} @ ${(trade.price * 100).toFixed(1)}¢`,
-          { style: { background: '#0a0a0a', color: '#4FFFC8', border: '1px solid #4FFFC8' }, duration: 2000 }
+        toast(
+          (t) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={{ fontWeight: 600 }}>
+                ⚡ {instantTradeShares} {trade.side} @ {(trade.price * 100).toFixed(1)}¢
+              </span>
+              <span style={{ fontSize: '12px', opacity: 0.8 }}>{trade.marketName}</span>
+              <button
+                onClick={() => { toast.dismiss(t.id); router.push('/dashboard'); }}
+                style={{
+                  marginTop: '4px',
+                  padding: '6px 12px',
+                  borderRadius: '9999px',
+                  background: '#4FFFC8',
+                  color: '#000',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '12px',
+                }}
+              >
+                Open in Dashboard →
+              </button>
+            </div>
+          ),
+          {
+            duration: 5000,
+            style: { background: '#0a0a0a', color: '#4FFFC8', border: '1px solid #4FFFC8', maxWidth: '360px' },
+          }
         );
         setTimeout(() => setInstantTradeSuccess(null), 2000);
       } else {

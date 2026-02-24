@@ -1740,6 +1740,11 @@ function DashboardContent() {
                           pos.marketId.includes(m.id)
                         );
                       }
+                      // Resolve display name: prefer market catalog name, then pos.marketName, then format raw ID
+                      const isRawId = /^\d+$/.test(pos.marketName) || pos.marketName.startsWith('Market ');
+                      const resolvedName = market
+                        ? (market.eventTitle || market.name || pos.marketName)
+                        : (isRawId ? pos.marketName : pos.marketName);
                     
                       const eventMarkets = groupedMarkets.find(g => 
                         g.markets.some(m => 
@@ -1809,7 +1814,7 @@ function DashboardContent() {
                                     <span className="w-1 h-1 rounded-full bg-blue-400" />P
                                   </span>
                                 )}
-                                <span className="truncate">{market ? (market.eventTitle || market.name || pos.marketName) : pos.marketName}</span>
+                                <span className="truncate">{resolvedName}</span>
                               </div>
                               <span className={`text-xs font-medium px-2 py-1 rounded ${
                                 pos.side === 'YES' ? 'text-[#10b981] bg-[#10b981]/10' : 'text-[#ef4444] bg-[#ef4444]/10'
@@ -1871,7 +1876,7 @@ function DashboardContent() {
                                 <span className="w-1 h-1 rounded-full bg-blue-400" />POLY
                               </span>
                             )}
-                            <span className="truncate">{market ? (market.eventTitle || market.name || pos.marketName) : pos.marketName}</span>
+                            <span className="truncate">{resolvedName}</span>
                           </div>
                           <div className="hidden md:col-span-1 md:block text-center">
                             <span className={`text-xs font-medium ${

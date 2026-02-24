@@ -258,6 +258,23 @@ export async function POST(req: NextRequest) {
 
     await client.query("COMMIT");
 
+    // Save market name to market_metadata so dashboard can display it
+    const marketName = body.marketName ? String(body.marketName) : null;
+    if (marketName) {
+      try {
+        await client.query(
+          `INSERT INTO market_metadata (provider, market_id, name, category)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (provider, market_id)
+           DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`,
+          [provider, marketId, marketName, body.category || 'General']
+        );
+      } catch (metaErr) {
+        // Non-critical — don't fail the trade if metadata insert fails
+        console.warn('[Buy] Could not save market metadata:', metaErr);
+      }
+    }
+
     // Log successful trade for debugging
     const balanceBefore = Number(subscription.current_balance);
     const balanceAfter = balanceBefore - cost;

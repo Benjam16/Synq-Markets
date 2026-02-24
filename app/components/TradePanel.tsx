@@ -430,6 +430,8 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
           currentOutcome: currentOutcome, // Full outcome object for price lookup
           price: currentPrice,
           quantity: Number(quantity),
+          marketName: selectedMarket.eventTitle || selectedMarket.name || displayTitle,
+          category: selectedMarket.category || 'General',
         }),
       });
 
