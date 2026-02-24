@@ -463,14 +463,36 @@ export default function LandingPage() {
                 className="group relative overflow-hidden bg-[#0a0a0a] border border-[#1A1A1A] rounded-2xl hover:border-[#4FFFC8]/30 transition-all"
               >
                 <Link href="/terminal" className="block">
-                  {/* Screenshot */}
-                  <div className="w-full aspect-[16/9] overflow-hidden border-b border-[#1A1A1A]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src="/screenshots/terminal-preview.png"
-                      alt="Prop Market Terminal — live trades from Polymarket and Kalshi"
-                      className="w-full h-full object-cover object-top group-hover:scale-[1.02] transition-transform duration-500"
-                    />
+                  {/* Live Terminal Mockup */}
+                  <div className="w-full aspect-[16/9] overflow-hidden border-b border-[#1A1A1A] bg-[#060606] p-4 group-hover:bg-[#080808] transition-colors">
+                    {/* Terminal header bar */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="flex gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-red-500/60" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/60" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-green-500/60" />
+                      </div>
+                      <span className="text-[9px] text-slate-600 font-mono ml-2">PROP MARKET — LIVE TERMINAL</span>
+                      <span className="ml-auto text-[8px] text-emerald-500/60 font-mono flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />CONNECTED</span>
+                    </div>
+                    {/* Simulated feed lines */}
+                    <div className="space-y-1.5 font-mono text-[10px]">
+                      {[
+                        { time: '14:32:07', side: 'BUY',  market: 'Will BTC hit $120K by July?', amt: '$2,450', color: 'text-emerald-400' },
+                        { time: '14:32:05', side: 'SELL', market: 'Fed Rate Cut June 2026',       amt: '$8,200', color: 'text-red-400' },
+                        { time: '14:32:03', side: 'BUY',  market: 'ETH > $5K end of Q2?',        amt: '$1,100', color: 'text-emerald-400' },
+                        { time: '14:32:01', side: 'BUY',  market: 'Trump wins 2028 GOP primary?', amt: '$15,000', color: 'text-amber-400' },
+                        { time: '14:31:58', side: 'SELL', market: 'SpaceX IPO before 2027?',      amt: '$3,750', color: 'text-red-400' },
+                        { time: '14:31:55', side: 'BUY',  market: 'US Recession in 2026?',        amt: '$920',  color: 'text-emerald-400' },
+                      ].map((row, i) => (
+                        <div key={i} className="flex items-center gap-3 px-2 py-1 rounded bg-white/[0.02]" style={{ opacity: 1 - i * 0.12 }}>
+                          <span className="text-slate-600 w-14 flex-shrink-0">{row.time}</span>
+                          <span className={`w-8 flex-shrink-0 font-bold ${row.color}`}>{row.side}</span>
+                          <span className="text-slate-300 truncate flex-1">{row.market}</span>
+                          <span className="text-slate-400 flex-shrink-0">{row.amt}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   {/* Info */}
                   <div className="p-6">
@@ -500,14 +522,42 @@ export default function LandingPage() {
                 className="group relative overflow-hidden bg-[#0a0a0a] border border-[#1A1A1A] rounded-2xl hover:border-[#4FFFC8]/30 transition-all"
               >
                 <Link href="/markets" className="block">
-                  {/* Screenshot */}
-                  <div className="w-full aspect-[16/9] overflow-hidden border-b border-[#1A1A1A]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src="/screenshots/markets-preview.png"
-                      alt="Prop Market Markets — browse Polymarket and Kalshi markets"
-                      className="w-full h-full object-cover object-top group-hover:scale-[1.02] transition-transform duration-500"
-                    />
+                  {/* Markets Explorer Mockup */}
+                  <div className="w-full aspect-[16/9] overflow-hidden border-b border-[#1A1A1A] bg-[#060606] p-4 group-hover:bg-[#080808] transition-colors">
+                    {/* Search bar mockup */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="flex-1 h-7 rounded-full bg-white/[0.04] border border-[#1A1A1A] flex items-center px-3">
+                        <span className="text-[10px] text-slate-600">🔍 Search markets...</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <span className="px-2 py-1 rounded-full bg-[#4FFFC8]/10 border border-[#4FFFC8]/20 text-[8px] text-[#4FFFC8] font-bold">ALL</span>
+                        <span className="px-2 py-1 rounded-full bg-white/[0.03] border border-[#1A1A1A] text-[8px] text-slate-500">POLY</span>
+                        <span className="px-2 py-1 rounded-full bg-white/[0.03] border border-[#1A1A1A] text-[8px] text-slate-500">KALSHI</span>
+                      </div>
+                    </div>
+                    {/* Market cards grid */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { name: 'Bitcoin > $120K', prob: '67%', vol: '$1.2M', badge: 'POLY', badgeColor: 'text-blue-400 bg-blue-500/10' },
+                        { name: 'Fed Rate Cut June', prob: '42%', vol: '$890K', badge: 'KALS', badgeColor: 'text-emerald-400 bg-emerald-500/10' },
+                        { name: 'ETH Flips BNB', prob: '81%', vol: '$2.1M', badge: 'POLY', badgeColor: 'text-blue-400 bg-blue-500/10' },
+                        { name: 'US GDP > 3%', prob: '35%', vol: '$450K', badge: 'KALS', badgeColor: 'text-emerald-400 bg-emerald-500/10' },
+                      ].map((card, i) => (
+                        <div key={i} className="rounded-lg bg-white/[0.02] border border-[#1A1A1A] p-2.5">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className={`text-[7px] font-bold px-1.5 py-0.5 rounded-full ${card.badgeColor}`}>{card.badge}</span>
+                            <span className="text-[8px] text-slate-600">{card.vol}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-300 font-medium mb-1.5 truncate">{card.name}</div>
+                          <div className="flex items-center justify-between">
+                            <div className="h-1 flex-1 rounded-full bg-white/[0.05] mr-2 overflow-hidden">
+                              <div className="h-full rounded-full bg-[#4FFFC8]/40" style={{ width: card.prob }} />
+                            </div>
+                            <span className="text-[9px] text-[#4FFFC8] font-bold">{card.prob}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   {/* Info */}
                   <div className="p-6">
