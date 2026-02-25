@@ -218,6 +218,7 @@ export default function TerminalPage() {
   const [scannerCategory, setScannerCategory] = useState('All');
   const [scannerSearch, setScannerSearch] = useState('');
   const [liveSubTab, setLiveSubTab] = useState<'all' | 'orders' | 'fills'>('all');
+  const [isMobile, setIsMobile] = useState(false);
   // ── Advanced Filters ──
   const [filterProvider, setFilterProvider] = useState<'all' | 'Polymarket' | 'Kalshi'>('all');
   const [filterSide, setFilterSide] = useState<'all' | 'Yes' | 'No'>('all');
@@ -261,6 +262,19 @@ export default function TerminalPage() {
       const tutorialSeen = localStorage.getItem('terminal-tutorial-seen');
       if (!tutorialSeen) setShowTutorial(true);
     } catch {}
+  }, []);
+
+  // ── Detect mobile / small-screen devices to gate the terminal ──
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const check = () => {
+      const width = window.innerWidth;
+      const isTouch = 'ontouchstart' in window || (navigator as any).maxTouchPoints > 1;
+      setIsMobile(width < 1024 && isTouch);
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
   }, []);
 
   // ── Save instant trade shares ──
@@ -827,6 +841,85 @@ export default function TerminalPage() {
   // ============================================================================
   // RENDER
   // ============================================================================
+
+  if (isMobile) {
+    return (
+      <div className="relative h-[100dvh] bg-[#030303] text-white overflow-hidden flex items-center justify-center px-6 py-10">
+        {/* Animated glowing grid background */}
+        <div className="fixed inset-0 pointer-events-none -z-10">
+          <motion.div
+            className="absolute inset-0"
+            style={{
+              backgroundImage:
+                'radial-gradient(circle at top, rgba(79,255,200,0.22), transparent 60%), radial-gradient(circle at bottom, rgba(123,97,255,0.28), transparent 55%)',
+            }}
+            animate={{ opacity: [0.6, 0.9, 0.6] }}
+            transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div
+            className="absolute inset-[-120px]"
+            style={{
+              backgroundImage:
+                'linear-gradient(to right, rgba(79,255,200,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(79,255,200,0.12) 1px, transparent 1px)',
+              backgroundSize: '40px 40px',
+            }}
+            animate={{
+              backgroundPositionX: ['0px', '40px'],
+              backgroundPositionY: ['0px', '40px'],
+            }}
+            transition={{ duration: 22, repeat: Infinity, ease: 'linear' }}
+          />
+        </div>
+
+        <div className="relative z-10 max-w-md w-full">
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.35, ease: 'easeOut' }}
+            className="rounded-3xl border border-[#1A1A1A] bg-black/70 backdrop-blur-xl px-6 py-8 shadow-[0_0_60px_rgba(79,255,200,0.25)]"
+          >
+            <div className="flex flex-col items-center text-center space-y-5">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-2xl bg-[#050b0a] border border-[#4FFFC8]/40 flex items-center justify-center shadow-[0_0_30px_rgba(79,255,200,0.45)]">
+                  <Activity className="w-8 h-8 text-[#4FFFC8]" />
+                </div>
+                <motion.div
+                  className="absolute inset-0 rounded-2xl border border-[#4FFFC8]/30"
+                  animate={{ rotate: [0, 6, 0] }}
+                  transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+                />
+              </div>
+
+              <div>
+                <h1 className="text-xl font-black tracking-tight uppercase mb-1">
+                  Terminal is Desktop-First
+                </h1>
+                <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
+                  We aim to provide the best experience possible, so we recommend you visit the{' '}
+                  <span className="text-[#4FFFC8] font-semibold">Terminal</span> on your desktop.
+                  In the meantime, feel free to explore and trade on{' '}
+                  <span className="text-[#4FFFC8] font-semibold">Markets</span>.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 w-full mt-2">
+                <Link
+                  href="/markets"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-[#4FFFC8] text-black text-sm font-semibold py-2.5 px-5 hover:bg-[#3de6b3] transition-colors shadow-[0_0_18px_rgba(79,255,200,0.65)]"
+                >
+                  Go to Markets
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+                <p className="text-[11px] text-slate-500">
+                  Visit this page from a laptop or desktop to unlock the full Prop Market Terminal.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col bg-[#050505] bg-grid-trading text-white font-[family-name:var(--font-inter)] overflow-hidden">

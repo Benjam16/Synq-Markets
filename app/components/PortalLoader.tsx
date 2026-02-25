@@ -95,6 +95,7 @@ export default function PortalLoader({ children }: PortalLoaderProps) {
         {isLoading && (
           <motion.div
             className="fixed inset-0 z-[99999] bg-[#030303] flex flex-col items-center justify-center"
+            style={{ minHeight: '100dvh' }}
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.6, ease: 'easeInOut' }}
@@ -102,7 +103,7 @@ export default function PortalLoader({ children }: PortalLoaderProps) {
             {/* Clean Background - Single gradient orb */}
             <div className="absolute inset-0 overflow-hidden">
               <motion.div
-                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full"
+                className="absolute left-1/2 top-[46%] md:top-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full"
                 style={{
                   background: 'radial-gradient(circle, rgba(79,255,200,0.08) 0%, transparent 50%)',
                 }}
