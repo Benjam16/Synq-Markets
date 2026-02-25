@@ -218,7 +218,7 @@ export default function TerminalPage() {
   const [scannerCategory, setScannerCategory] = useState('All');
   const [scannerSearch, setScannerSearch] = useState('');
   const [liveSubTab, setLiveSubTab] = useState<'all' | 'orders' | 'fills'>('all');
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState<boolean | null>(null);
   // ── Advanced Filters ──
   const [filterProvider, setFilterProvider] = useState<'all' | 'Polymarket' | 'Kalshi'>('all');
   const [filterSide, setFilterSide] = useState<'all' | 'Yes' | 'No'>('all');
@@ -265,13 +265,9 @@ export default function TerminalPage() {
   }, []);
 
   // ── Detect mobile / small-screen devices to gate the terminal ──
+  // Uses null → true/false tri-state so nothing renders until we know for sure.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const check = () => {
-      const width = window.innerWidth;
-      const isTouch = 'ontouchstart' in window || (navigator as any).maxTouchPoints > 1;
-      setIsMobile(width < 1024 && isTouch);
-    };
+    const check = () => setIsMobile(window.innerWidth < 1024);
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -841,6 +837,11 @@ export default function TerminalPage() {
   // ============================================================================
   // RENDER
   // ============================================================================
+
+  // While detecting screen size, show a blank dark screen to prevent terminal flash
+  if (isMobile === null) {
+    return <div className="h-[100dvh] bg-[#030303]" />;
+  }
 
   if (isMobile) {
     return (
