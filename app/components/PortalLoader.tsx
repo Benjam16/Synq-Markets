@@ -193,9 +193,9 @@ export default function PortalLoader({ children }: PortalLoaderProps) {
             </div>
 
             {/* Central Content */}
-            <div className="relative z-10 flex flex-col items-center">
+            <div className="relative z-10 flex flex-col items-center justify-center w-full px-4">
               {/* Main Portal */}
-              <div className="relative mb-10">
+              <div className="relative mb-10 mx-auto flex items-center justify-center">
                 {/* Outer glow */}
                 <motion.div
                   className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 rounded-full"
@@ -285,7 +285,7 @@ export default function PortalLoader({ children }: PortalLoaderProps) {
 
                 {/* Progress Ring */}
                 <svg
-                  className="absolute -inset-4 w-64 h-64 -rotate-90"
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 -rotate-90"
                   viewBox="0 0 100 100"
                 >
                   <defs>
