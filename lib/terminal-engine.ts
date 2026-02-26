@@ -177,26 +177,21 @@ async function ensureMarketInfoMap(): Promise<void> {
     console.warn('[Terminal] Failed to build Polymarket name map:', err);
   }
 
-  // ── Overlay fast crypto markets (category: 'Fast Markets') ──────────────
-  try {
-    const { fetchFastCryptoMarkets } = await import('./market-fetchers');
-    const fastMkts = await fetchFastCryptoMarkets();
-    for (const fm of fastMkts) {
-      const key = (fm.conditionId || fm.id || '').toLowerCase();
-      if (!key) continue;
-      const info: MarketInfo = {
-        name: fm.eventTitle || fm.name || '',
-        externalUrl: fm.kalshiUrl || fm.polymarketUrl || '',
-        category: 'Fast Markets',
-        imageUrl: fm.imageUrl || '',
-      };
-      if (key) m.set(key, info);
-      if (fm.slug) m.set(fm.slug.toLowerCase(), info);
+  // ── Tag "Up or Down" crypto entries in the map as 'Fast Markets' ────────
+  // Avoids a separate API call — just re-labels entries we already fetched.
+  let fastTagCount = 0;
+  const FAST_CRYPTO_KW = ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'xrp', 'doge', 'avax', 'link', 'bnb'];
+  for (const [key, info] of m.entries()) {
+    const nameLower = info.name.toLowerCase();
+    if (
+      (nameLower.includes('up or down') || nameLower.includes('up/down')) &&
+      FAST_CRYPTO_KW.some(kw => nameLower.includes(kw))
+    ) {
+      m.set(key, { ...info, category: 'Fast Markets' });
+      fastTagCount++;
     }
-    console.log(`[Terminal] Added ${fastMkts.length} fast crypto markets to info map`);
-  } catch (err) {
-    console.warn('[Terminal] Fast markets overlay error:', err);
   }
+  console.log(`[Terminal] Tagged ${fastTagCount} entries as Fast Markets`);
 
   if (m.size > 0) {
     _marketInfoMap = m;

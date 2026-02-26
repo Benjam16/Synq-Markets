@@ -773,15 +773,15 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
         // 1. Zombie Markets (2018-2023) - old resolved markets
         if (m.name && (m.name.includes("2018") || m.name.includes("2023"))) return false;
         // 2. Already resolved markets (past resolution date)
-        // BUT: Be lenient - if it's an "Up or Down" market, include it even if date seems past
-        const isUpOrDown = (m.name || '').toLowerCase().includes('up or down') ||
-                          (m.name || '').toLowerCase().includes('up/down');
-        if (m.resolutionDate && !isUpOrDown) {
+        // Only drop markets that have ALREADY resolved (with a small 5-min buffer).
+        // Do NOT use a 1-hour lookahead — that was incorrectly filtering out
+        // hourly, 15-min, and 5-min markets that are still actively tradeable.
+        if (m.resolutionDate) {
           try {
             const resDate = new Date(m.resolutionDate);
-            // Add 1 hour buffer to account for timezone issues
-            const bufferTime = new Date(now.getTime() + 60 * 60 * 1000);
-            if (resDate < bufferTime) return false;
+            // 5-minute grace period to handle slight clock skew
+            const cutoff = new Date(now.getTime() - 5 * 60 * 1000);
+            if (resDate < cutoff) return false;
           } catch (e) {
             // If date parsing fails, include the market
           }
@@ -789,11 +789,9 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
         // 3. Markets with no outcomes (invalid markets)
         // BUT: "Up or Down" markets might have outcomes in a different format
         if (!m.outcomes || m.outcomes.length === 0) {
-          // If it's an "Up or Down" market, create default outcomes
-          if (isUpOrDown) {
-            // This will be handled by the processing logic, so include it
-            return true;
-          }
+          const nameForCheck = (m.name || '').toLowerCase();
+          const isUpOrDownCheck = nameForCheck.includes('up or down') || nameForCheck.includes('up/down');
+          if (isUpOrDownCheck) return true; // handled by processing logic
           return false;
         }
         
@@ -1273,210 +1271,61 @@ export async function fetchAllMarkets(limit: number = 10000): Promise<UnifiedMar
 // Polymarket and Kalshi. Tagged as category: 'Fast Markets'.
 // ============================================================================
 
+/**
+ * Identifies fast-settling crypto markets from the full market dataset.
+ *
+ * Strategy: reuse the data already fetched + cached by fetchAllMarkets() so
+ * we never make redundant API calls. Filter for "Up or Down" / "Up/Down"
+ * style crypto markets — these are the rolling 5-min, 15-min, and hourly
+ * crypto price resolution markets on both Polymarket and Kalshi.
+ *
+ * NOTE on Polymarket naming: their fast markets have titles like
+ *   "Bitcoin Up or Down - February 26, 9AM ET"   ← NO "min" in title
+ * So we match on "up or down" + crypto keyword only, not on time period.
+ *
+ * NOTE on Kalshi naming: their fast markets have titles like
+ *   "BTC Up or Down - 15 minutes"
+ * These also match on "up or down" + crypto keyword.
+ */
 export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
-  const nowMs = Date.now();
-  const markets: UnifiedMarket[] = [];
+  // Pull from the shared cache — avoids duplicate API calls
+  const allMarkets = await fetchAllMarkets(5000);
 
-  // ── 1. Polymarket "Up or Down" fast crypto events ─────────────────────
-  // These are events like "Bitcoin Up or Down - 5 min", "Ethereum Up or Down - 15 min"
-  // They live on the /events endpoint, NOT /markets
-  try {
-    const res = await fetch(
-      'https://gamma-api.polymarket.com/events?active=true&closed=false&tag_slug=crypto&sort=volume&ascending=false&limit=200',
-      { cache: 'no-store' },
-    );
-    if (res.ok) {
-      const raw = await res.json();
-      const events: any[] = Array.isArray(raw) ? raw : (raw.data || raw.events || []);
-      for (const event of events) {
-        const title = (event.title || '').toLowerCase();
-        const slug = event.slug || String(event.id || '');
+  const CRYPTO_KEYWORDS = [
+    'bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol',
+    'xrp', 'ripple', 'doge', 'dogecoin', 'avax', 'avalanche',
+    'link', 'chainlink', 'bnb', 'binance', 'dot', 'polkadot',
+    'hyperliquid', 'hype',
+  ];
 
-        // Match "Up or Down" style events with a time resolution period
-        const isUpOrDown = title.includes('up or down');
-        const hasTimePeriod =
-          title.includes('5 min') || title.includes('15 min') ||
-          title.includes('5-min') || title.includes('15-min') ||
-          title.includes('1 hour') || title.includes('hourly');
+  const fastMarkets = allMarkets.filter(m => {
+    const name = (m.name || m.eventTitle || '').toLowerCase();
 
-        if (!isUpOrDown || !hasTimePeriod) continue;
+    // Must be an "Up or Down" / "Up/Down" type market
+    const isUpDown =
+      name.includes('up or down') ||
+      name.includes('up/down') ||
+      name.includes('up or down');
+    if (!isUpDown) return false;
 
-        // Get the active market within the event (first non-closed one)
-        const eventMarkets: any[] = event.markets || [];
-        const activeMkt = eventMarkets.find((m: any) => m.active && !m.closed) || eventMarkets[0];
-        if (!activeMkt && eventMarkets.length === 0) continue;
+    // Must be crypto-related
+    const isCrypto =
+      (m.category || '').toLowerCase() === 'crypto' ||
+      CRYPTO_KEYWORDS.some(kw => name.includes(kw));
 
-        const endMs = new Date(activeMkt?.endDate || activeMkt?.end_date || 0).getTime();
-        const minsLeft = endMs > nowMs ? Math.round((endMs - nowMs) / 60_000) : 0;
-
-        // "Up" token price — Polymarket Up/Down markets have tokenIds
-        const tokens: any[] = activeMkt?.tokens || activeMkt?.clobTokenIds || [];
-        const upToken = tokens[0]; // index 0 = Up outcome
-        const upPrice = Math.max(
-          0.01,
-          Math.min(
-            0.99,
-            parseFloat(upToken?.price || activeMkt?.lastTradePrice || activeMkt?.bestBid || '0.5') || 0.5,
-          ),
-        );
-
-        const vol = parseInt(String(event.volume || activeMkt?.volume || '0'), 10);
-
-        markets.push({
-          id: event.id || slug,
-          conditionId: activeMkt?.conditionId || String(event.id || slug),
-          provider: 'Polymarket',
-          name: event.title || 'Unknown',
-          eventTitle: event.title || 'Unknown',
-          description: minsLeft > 0 ? `Resolves in ~${minsLeft} min` : 'Resolving soon',
-          price: upPrice,
-          outcomes: [
-            { id: `${slug}-up`, name: 'Up', price: upPrice },
-            { id: `${slug}-down`, name: 'Down', price: 1 - upPrice },
-          ],
-          imageUrl: event.image || event.imageUrl || '',
-          polymarketUrl: `https://polymarket.com/event/${slug}`,
-          kalshiUrl: '',
-          slug,
-          volume: vol,
-          volumeFormatted: formatVolume(vol),
-          category: 'Fast Markets',
-          last_updated: new Date().toISOString(),
-          resolutionDate: activeMkt?.endDate || activeMkt?.end_date || '',
-          change: 0,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('[FastMarkets] Polymarket error:', err);
-  }
-
-  // ── 2. Kalshi "Up or Down" fast crypto events ─────────────────────────
-  // Events like "BTC Up or Down - 15 minutes", "ETH Up or Down - 15 minutes"
-  // Match by title keywords OR by known crypto ticker prefixes.
-  // IMPORTANT: Do NOT filter by close_time — it can be null/missing for rolling
-  // markets; the fact the event is status=open is enough.
-  try {
-    const accessKey = process.env.KALSHI_ACCESS_KEY;
-    const privateKey = process.env.KALSHI_PRIVATE_KEY;
-    if (accessKey && privateKey) {
-      const { generateKalshiHeaders } = await import('./kalshi-auth');
-      const HOST = 'https://api.elections.kalshi.com';
-      const path = '/trade-api/v2/events';
-      // Fetch a larger batch so we catch all crypto fast events
-      const params = new URLSearchParams({ status: 'open', limit: '500', with_nested_markets: 'true' });
-      const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
-
-      const res = await fetch(`${HOST}${path}?${params}`, {
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders },
-        cache: 'no-store',
-      });
-      if (res.ok) {
-        const data = await res.json();
-
-        // Known crypto fast-settle series/event prefixes on Kalshi
-        const FAST_PREFIXES = [
-          'KXBTC', 'KXETH', 'KXSOL', 'KXDOGE', 'KXXBT',
-          'KXAVAX', 'KXLINK', 'KXBNB', 'KXDOT', 'KXXRP',
-          'BTCUSD', 'ETHUSD', 'SOLUSD', // some Kalshi events use USD suffix
-        ];
-
-        for (const event of (data.events || []) as any[]) {
-          const ticker = (event.event_ticker || '').toUpperCase();
-          const title = (event.title || '').toLowerCase();
-
-          // Match by title keyword: "up or down" + time period
-          const titleIsUpDown = title.includes('up or down');
-          const titleHasTime =
-            title.includes('5 min') || title.includes('15 min') || title.includes('minute') ||
-            title.includes('1 hour') || title.includes('hourly');
-
-          // Or match by known crypto prefix
-          const tickerIsCrypto = FAST_PREFIXES.some(p => ticker.startsWith(p));
-
-          // Must satisfy BOTH conditions to be considered a fast market:
-          // Either (title is "up or down" + has a time), or (crypto prefix + "up or down" title)
-          const isFastMarket = (titleIsUpDown && titleHasTime) || (tickerIsCrypto && titleIsUpDown);
-          if (!isFastMarket) continue;
-
-          const nested: any[] = event.markets || [];
-          if (nested.length === 0) continue;
-
-          // Find the currently active (open) nested market
-          const activeMkt = nested.find(
-            (m: any) => m.status === 'open' || (!m.status && !m.closed),
-          ) || nested[0];
-
-          const seriesTicker = event.series_ticker || '';
-          const kalshiSlug = seriesTicker
-            ? `${seriesTicker.toLowerCase()}/${event.event_ticker.toLowerCase()}`
-            : event.event_ticker.toLowerCase();
-
-          // Image — try series-level webp, fallback to empty
-          const imageUrl = seriesTicker
-            ? `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`
-            : '';
-
-          // Resolution time — try multiple field names; if missing, still show the market
-          const closeTimeStr =
-            activeMkt.close_time ||
-            activeMkt.expected_expiration_time ||
-            activeMkt.expiry_time ||
-            activeMkt.expires_at ||
-            '';
-          const closeMs = closeTimeStr ? new Date(closeTimeStr).getTime() : 0;
-          const minsLeft = closeMs > nowMs ? Math.round((closeMs - nowMs) / 60_000) : 0;
-
-          // Build outcomes (one per nested market — usually just one for Yes/No)
-          const outcomes = nested.map((m: any, idx: number) => {
-            let p =
-              m.last_price != null && m.last_price > 0 ? m.last_price / 100
-              : m.yes_bid  != null ? m.yes_bid  / 100
-              : m.yes_ask  != null ? m.yes_ask  / 100
-              : 0.5;
-            p = Math.max(0.01, Math.min(0.99, p));
-            const name = (m.subtitle || m.yes_sub_title || m.title || '')
-              .replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim() || (idx === 0 ? 'Yes' : `Option ${idx + 1}`);
-            return { id: m.ticker || `${event.event_ticker}-${idx}`, name, price: p };
-          });
-
-          const primaryPrice = outcomes.length > 0 ? outcomes[0].price : 0.5;
-          const totalVol = nested.reduce((s: number, m: any) => s + (m.volume || 0), 0);
-
-          markets.push({
-            id: `kalshi-fast-${event.event_ticker}`,
-            conditionId: event.event_ticker,
-            provider: 'Kalshi',
-            name: event.title || event.event_ticker,
-            eventTitle: event.title || event.event_ticker,
-            description: minsLeft > 0 ? `Resolves in ~${minsLeft} min` : 'Fast-settling crypto',
-            price: primaryPrice,
-            outcomes,
-            imageUrl,
-            polymarketUrl: `https://kalshi.com/markets/${kalshiSlug}`,
-            kalshiUrl: `https://kalshi.com/markets/${kalshiSlug}`,
-            slug: event.event_ticker.toLowerCase(),
-            volume: totalVol,
-            volumeFormatted: formatVolume(totalVol),
-            category: 'Fast Markets',
-            last_updated: new Date().toISOString(),
-            resolutionDate: closeTimeStr,
-            change: 0,
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[FastMarkets] Kalshi error:', err);
-  }
-
-  // Sort soonest-resolving first (markets without a resolutionDate go to the end)
-  markets.sort((a, b) => {
-    const at = a.resolutionDate ? new Date(a.resolutionDate).getTime() : Number.MAX_SAFE_INTEGER;
-    const bt = b.resolutionDate ? new Date(b.resolutionDate).getTime() : Number.MAX_SAFE_INTEGER;
-    return at - bt;
+    return isCrypto;
   });
 
-  console.log(`[FastMarkets] ${markets.length} fast crypto markets found`);
-  return markets;
+  // Return with category overridden to 'Fast Markets'
+  const result = fastMarkets.map(m => ({
+    ...m,
+    category: 'Fast Markets',
+    description: m.description || 'Fast-settling crypto market',
+  }));
+
+  // Sort by volume descending (most active first)
+  result.sort((a, b) => (b.volume || 0) - (a.volume || 0));
+
+  console.log(`[FastMarkets] ${result.length} fast crypto markets (filtered from ${allMarkets.length} total)`);
+  return result;
 }
