@@ -197,11 +197,35 @@ export default function MarketsPage() {
   // Debounced search for better performance
   const debouncedSearch = useDebounce(searchQuery, 300);
 
+  // ── Build Fast tab from BOTH fast API + client-side filter of main markets
+  const combinedFastMarkets = useMemo(() => {
+    const CRYPTO_KW = ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'xrp', 'doge', 'avax', 'link', 'bnb', 'hyperliquid'];
+    // Client-side filter: find "Up or Down" crypto markets already in the main markets list
+    const fromMain = markets.filter(m => {
+      const name = (m.name || m.eventTitle || '').toLowerCase();
+      const isUpDown = name.includes('up or down') || name.includes('up/down');
+      if (!isUpDown) return false;
+      const cat = (m.category || '').toLowerCase();
+      return cat === 'crypto' || CRYPTO_KW.some(kw => name.includes(kw));
+    });
+    // Merge with fast API results, deduplicate by id
+    const seen = new Set<string>();
+    const merged: Market[] = [];
+    for (const m of [...fastMarkets, ...fromMain]) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      merged.push(m);
+    }
+    // Sort by volume descending
+    merged.sort((a, b) => (b.volume || 0) - (a.volume || 0));
+    return merged;
+  }, [markets, fastMarkets]);
+
   // Group markets by event (slug) - Polymarket style: one card per event
   const groupedMarkets = useMemo(() => {
-    // Fast tab: use fastMarkets directly (skip the regular markets pipeline)
+    // Fast tab: use combined fast markets (API + client-side filter)
     if (selectedCategory === 'Fast') {
-      const source = fastMarkets.filter(m => {
+      const source = combinedFastMarkets.filter(m => {
         if (sourceFilter !== 'All' && m.provider !== sourceFilter) return false;
         if (!debouncedSearch) return true;
         return (m.eventTitle || m.name).toLowerCase().includes(debouncedSearch.toLowerCase());
@@ -706,7 +730,7 @@ export default function MarketsPage() {
         // Then sort by volume
         return b.totalVolume - a.totalVolume;
       });
-  }, [markets, fastMarkets, debouncedSearch, selectedCategory, sourceFilter]);
+  }, [markets, combinedFastMarkets, debouncedSearch, selectedCategory, sourceFilter]);
 
   // ── Countdown helper for Fast Markets ──────────────────────────────────
   const getCountdown = useCallback((resolutionDate: string | undefined): string => {
@@ -887,12 +911,12 @@ export default function MarketsPage() {
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-amber-400 text-[10px] font-bold">{fastMarkets.length} markets</span>
+              <span className="text-amber-400 text-[10px] font-bold">{combinedFastMarkets.length} markets</span>
             </div>
           </div>
         )}
 
-        {(loading && selectedCategory !== 'Fast') || (fastMarketsLoading && selectedCategory === 'Fast' && fastMarkets.length === 0) ? (
+        {(loading && selectedCategory !== 'Fast') || (fastMarketsLoading && selectedCategory === 'Fast' && combinedFastMarkets.length === 0) ? (
           <div className="flex items-center justify-center py-32">
             <div className="flex flex-col items-center gap-4">
               <div className={`w-12 h-12 border-4 border-t-transparent rounded-full animate-spin ${selectedCategory === 'Fast' ? 'border-amber-400' : 'border-[#4FFFC8]'}`} />
@@ -936,15 +960,6 @@ export default function MarketsPage() {
             className="mt-4"
             renderItem={(eventGroup, index) => (
               <div key={eventGroup.key} className="relative">
-                {/* Countdown badge for fast markets */}
-                {selectedCategory === 'Fast' && eventGroup.mainMarket.resolutionDate && (
-                  <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 backdrop-blur-sm">
-                    <Timer className="w-2.5 h-2.5 text-amber-400" />
-                    <span className="text-amber-400 text-[10px] font-mono font-bold">
-                      {getCountdown(eventGroup.mainMarket.resolutionDate)}
-                    </span>
-                  </div>
-                )}
                 <MarketCard
                   market={eventGroup.mainMarket}
                   onBuy={handleBuy}
@@ -959,6 +974,15 @@ export default function MarketsPage() {
                   isSelected={selectedEvent?.key === eventGroup.key}
                   marketCount={eventGroup.markets.length}
                 />
+                {/* Countdown badge pinned to bottom bar for fast markets */}
+                {selectedCategory === 'Fast' && eventGroup.mainMarket.resolutionDate && (
+                  <div className="absolute bottom-[13px] left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 backdrop-blur-sm">
+                    <Timer className="w-2.5 h-2.5 text-amber-400" />
+                    <span className="text-amber-400 text-[10px] font-mono font-bold whitespace-nowrap">
+                      {getCountdown(eventGroup.mainMarket.resolutionDate)}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           />
