@@ -35,6 +35,9 @@ import {
   Info,
   SlidersHorizontal,
   Filter,
+  Pause,
+  Play,
+  Gauge,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -231,6 +234,13 @@ export default function TerminalPage() {
   const [filterFastOnly, setFilterFastOnly] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
+  // ── Feed Control State ──
+  const [feedPaused, setFeedPaused] = useState(false);
+  const [feedSpeed, setFeedSpeed] = useState<'0.5x' | '1x' | '2x' | '3x'>('1x');
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const speedMenuRef = useRef<HTMLDivElement>(null);
+  const pauseBufferRef = useRef<TerminalTrade[]>([]);
+  const feedPausedRef = useRef(false);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
   const [quickTradeMarket, setQuickTradeMarket] = useState<Market | null>(null);
   const [isQuickTradeOpen, setIsQuickTradeOpen] = useState(false);
@@ -250,6 +260,9 @@ export default function TerminalPage() {
   const tradeListRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const userIdCacheRef = useRef<number | null>(null);
+
+  // Keep pause ref in sync for use inside polling closure
+  feedPausedRef.current = feedPaused;
   const seenWhaleIdsRef = useRef<Set<string>>(new Set());
   const instantSettingsRef = useRef<HTMLDivElement>(null);
 
@@ -588,9 +601,11 @@ export default function TerminalPage() {
     setChartTrade(chartData);
   }, []);
 
-  // ── Data Polling (optimized: immediate fetch + 2s interval) ──
+  // ── Data Polling (optimized: respects pause + speed) ──
   const tradesRef = useRef<TerminalTrade[]>([]);
   tradesRef.current = trades;
+
+  const speedToMs: Record<string, number> = { '0.5x': 3000, '1x': 1500, '2x': 750, '3x': 400 };
 
   useEffect(() => {
     let mounted = true;
@@ -604,16 +619,49 @@ export default function TerminalPage() {
 
         if (!mounted) return;
 
-        // Check for new trades (for sound)
+        const incoming: TerminalTrade[] = data.trades || [];
+
+        if (feedPausedRef.current) {
+          // While paused: buffer new trades but don't update the visible list
+          const existingIds = new Set(tradesRef.current.map(t => t.id));
+          const bufferIds = new Set(pauseBufferRef.current.map(t => t.id));
+          const brandNew = incoming.filter(t => !existingIds.has(t.id) && !bufferIds.has(t.id));
+          if (brandNew.length > 0) {
+            pauseBufferRef.current = [...brandNew, ...pauseBufferRef.current].slice(0, 300);
+          }
+          // Still update stats, whale alerts, arb signals etc. even while paused
+          setStats(data.stats || null);
+          setArbSignals(data.arbSignals || []);
+          setMarketTicks(data.marketTicks || []);
+          setConnected(true);
+
+          const incomingWhales: WhaleAlert[] = data.whaleAlerts || [];
+          const uniqueWhales: WhaleAlert[] = [];
+          for (const w of incomingWhales) {
+            const key = `${w.provider}-${w.marketId}-${w.side}-${w.notional}-${w.timestamp}`;
+            if (!seenWhaleIdsRef.current.has(key)) {
+              seenWhaleIdsRef.current.add(key);
+              uniqueWhales.push(w);
+            }
+          }
+          if (uniqueWhales.length > 0) {
+            setWhaleAlerts(prev => {
+              const prevIds = new Set(prev.map(w => w.id));
+              const bNew = uniqueWhales.filter(w => !prevIds.has(w.id));
+              return [...bNew, ...prev].slice(0, 50);
+            });
+          }
+          return;
+        }
+
+        // Not paused: normal processing
         if (data.trades?.length > 0 && tradesRef.current.length > 0) {
           const prevIds = new Set(tradesRef.current.map((t: TerminalTrade) => t.id));
-          const newCount = data.trades.filter((t: TerminalTrade) => !prevIds.has(t.id)).length;
+          const newCount = incoming.filter((t: TerminalTrade) => !prevIds.has(t.id)).length;
           if (newCount > 0) playClick();
         }
 
-        // Accumulate trades — new ones go to the top, old ones scroll down, cap at 300
         setTrades(prev => {
-          const incoming: TerminalTrade[] = data.trades || [];
           if (prev.length === 0) return incoming.slice(0, 300);
           const existingIds = new Set(prev.map(t => t.id));
           const brandNew = incoming.filter(t => !existingIds.has(t.id));
@@ -621,18 +669,15 @@ export default function TerminalPage() {
           return [...brandNew, ...prev].slice(0, 300);
         });
 
-        // ── Deduplicate whale alerts ──
         const incomingWhales: WhaleAlert[] = data.whaleAlerts || [];
         const uniqueWhales: WhaleAlert[] = [];
         for (const w of incomingWhales) {
-          // Create a stable key from provider + marketId + side + notional + timestamp
           const key = `${w.provider}-${w.marketId}-${w.side}-${w.notional}-${w.timestamp}`;
           if (!seenWhaleIdsRef.current.has(key)) {
             seenWhaleIdsRef.current.add(key);
             uniqueWhales.push(w);
           }
         }
-        // Merge with existing (keep most recent first, cap at 50)
         setWhaleAlerts(prev => {
           const prevIds = new Set(prev.map(w => w.id));
           const brandNew = uniqueWhales.filter(w => !prevIds.has(w.id));
@@ -650,8 +695,9 @@ export default function TerminalPage() {
       }
     };
 
-    poll(); // Immediate fetch on mount
-    const interval = setInterval(poll, 1500); // 1.5s for snappier feel
+    poll();
+    const intervalMs = speedToMs[feedSpeed] || 1500;
+    const interval = setInterval(poll, intervalMs);
 
     return () => {
       mounted = false;
@@ -659,14 +705,47 @@ export default function TerminalPage() {
       clearInterval(interval);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playClick]);
+  }, [playClick, feedSpeed]);
 
-  // ── Auto-scroll trade list ──
+  // ── Flush buffer when unpausing ──
+  const togglePause = useCallback(() => {
+    setFeedPaused(prev => {
+      const wasPaused = prev;
+      if (wasPaused) {
+        // Unpausing: flush buffer into visible trades
+        const buffer = pauseBufferRef.current;
+        if (buffer.length > 0) {
+          setTrades(prevTrades => {
+            const existingIds = new Set(prevTrades.map(t => t.id));
+            const brandNew = buffer.filter(t => !existingIds.has(t.id));
+            return [...brandNew, ...prevTrades].slice(0, 300);
+          });
+          pauseBufferRef.current = [];
+        }
+      }
+      return !prev;
+    });
+  }, []);
+
+  // ── Auto-scroll trade list (only when not paused) ──
   useEffect(() => {
-    if (tradeListRef.current && activeTab === 'live') {
+    if (!feedPaused && tradeListRef.current && activeTab === 'live') {
       tradeListRef.current.scrollTop = 0;
     }
-  }, [trades, activeTab]);
+  }, [trades, activeTab, feedPaused]);
+
+  // Close speed menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (speedMenuRef.current && !speedMenuRef.current.contains(e.target as Node)) {
+        setShowSpeedMenu(false);
+      }
+    };
+    if (showSpeedMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showSpeedMenu]);
 
   // ── Wallet Lookup ──
   const handleWalletLookup = async () => {
@@ -751,7 +830,7 @@ export default function TerminalPage() {
     if (filterTradeTier !== 'all') count++;
     if (filterFastOnly) count++;
     return count;
-  }, [filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch, filterFastOnly]);
+  }, [filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch, filterTradeTier, filterFastOnly]);
 
   const clearAllFilters = useCallback(() => {
     setFilterProvider('all');
@@ -1533,6 +1612,78 @@ export default function TerminalPage() {
 
                   <div className="flex-1" />
 
+                  {/* ── Feed Controls: Pause + Speed ── */}
+                  <div className="flex items-center gap-1.5">
+                    {/* Pause / Play */}
+                    <button
+                      onClick={togglePause}
+                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                        feedPaused
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          : 'text-slate-500 hover:text-white hover:bg-white/5'
+                      }`}
+                      title={feedPaused ? 'Resume feed' : 'Pause feed'}
+                    >
+                      {feedPaused ? (
+                        <>
+                          <Play className="w-3 h-3" />
+                          PAUSED
+                          {pauseBufferRef.current.length > 0 && (
+                            <span className="ml-0.5 text-[8px] text-amber-300">+{pauseBufferRef.current.length}</span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <Pause className="w-3 h-3" />
+                          LIVE
+                        </>
+                      )}
+                    </button>
+
+                    {/* Speed Control */}
+                    <div className="relative" ref={speedMenuRef}>
+                      <button
+                        onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                          feedSpeed !== '1x'
+                            ? 'bg-[#4FFFC8]/15 text-[#4FFFC8] border border-[#4FFFC8]/30'
+                            : 'text-slate-500 hover:text-white hover:bg-white/5'
+                        }`}
+                        title="Feed speed"
+                      >
+                        <Gauge className="w-3 h-3" />
+                        {feedSpeed}
+                      </button>
+                      <AnimatePresence>
+                        {showSpeedMenu && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -5 }}
+                            className="absolute top-full right-0 mt-1.5 bg-[#0a0a0a] border border-[#1A1A1A] rounded-lg p-1.5 z-50 shadow-xl min-w-[100px]"
+                          >
+                            <div className="text-[9px] text-slate-500 uppercase tracking-wider px-2 py-1 mb-0.5">Speed</div>
+                            {(['0.5x', '1x', '2x', '3x'] as const).map(speed => (
+                              <button
+                                key={speed}
+                                onClick={() => { setFeedSpeed(speed); setShowSpeedMenu(false); }}
+                                className={`w-full text-left px-2.5 py-1.5 rounded-md text-[11px] font-bold transition-all ${
+                                  feedSpeed === speed
+                                    ? 'bg-[#4FFFC8]/15 text-[#4FFFC8]'
+                                    : 'text-slate-400 hover:text-white hover:bg-white/5'
+                                }`}
+                              >
+                                {speed === '0.5x' ? '0.5x — Slow' : speed === '1x' ? '1x — Normal' : speed === '2x' ? '2x — Fast' : '3x — Rapid'}
+                              </button>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    <div className="w-px h-4 bg-[#1A1A1A] mx-0.5" />
+                  </div>
+
                   {/* Trade count */}
                   <span className="text-xs text-slate-500">
                     <span className="text-white font-mono">{filteredTrades.length}</span>
@@ -1541,6 +1692,37 @@ export default function TerminalPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Paused Banner */}
+              <AnimatePresence>
+                {feedPaused && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mx-1 mb-1"
+                  >
+                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <div className="flex items-center gap-2">
+                        <Pause className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-xs font-bold text-amber-400">Feed Paused</span>
+                        <span className="text-[10px] text-amber-400/60">
+                          {pauseBufferRef.current.length > 0
+                            ? `${pauseBufferRef.current.length} new trades queued`
+                            : 'Markets still loading in background'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={togglePause}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-all"
+                      >
+                        <Play className="w-3 h-3" />
+                        Resume
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Trade Feed */}
               <div

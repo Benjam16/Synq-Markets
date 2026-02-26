@@ -77,10 +77,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Stake must be positive' }, { status: 400 });
     }
 
-    // Deduplicate legs by marketId
-    const uniqueIds = new Set(legs.map(l => l.marketId));
-    if (uniqueIds.size !== legs.length) {
-      return NextResponse.json({ error: 'Each leg must be a different market' }, { status: 400 });
+    // Deduplicate legs by marketId + outcomeName + outcome side
+    const uniqueKeys = new Set(legs.map(l => {
+      const name = (l as any).outcomeName || '';
+      return `${l.marketId}::${name}::${l.outcome}`;
+    }));
+    if (uniqueKeys.size !== legs.length) {
+      return NextResponse.json({ error: 'Duplicate legs detected' }, { status: 400 });
     }
 
     // Validate prices

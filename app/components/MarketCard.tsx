@@ -8,6 +8,7 @@ export interface ParlayLeg {
   marketId: string;
   provider: string;
   outcome: 'yes' | 'no';
+  outcomeName?: string;
   price: number;
   marketName: string;
   status: 'pending' | 'won' | 'lost';
@@ -35,7 +36,8 @@ function MarketCardComponent({
   parlayLegs = [],
 }: MarketCardProps) {
   const parlayLeg = parlayLegs.find(l => l.marketId === market.id);
-  const inParlay = !!parlayLeg;
+  const parlayLegsForMarket = parlayLegs.filter(l => l.marketId === market.id);
+  const inParlay = parlayLegsForMarket.length > 0;
   // Get all outcomes from market data
   const getAllOutcomes = () => {
     // If market has explicit outcomes array with more than 2, show count
@@ -103,7 +105,7 @@ function MarketCardComponent({
 
   return (
     <div
-      onClick={() => { if (!parlayMode) onSelect?.(market); }}
+      onClick={() => onSelect?.(market)}
       className={`group relative bg-slate-950/50 backdrop-blur-md border rounded-md transition-all overflow-hidden ${
         parlayMode
           ? inParlay
@@ -118,7 +120,13 @@ function MarketCardComponent({
       {parlayMode && inParlay && (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30">
           <Check className="w-2.5 h-2.5 text-violet-300" />
-          <span className="text-[9px] text-violet-300 font-bold uppercase">{parlayLeg?.outcome}</span>
+          <span className="text-[9px] text-violet-300 font-bold uppercase">
+            {parlayLegsForMarket.length === 1
+              ? (parlayLegsForMarket[0].outcomeName
+                ? `${parlayLegsForMarket[0].outcomeName} ${parlayLegsForMarket[0].outcome}`
+                : parlayLegsForMarket[0].outcome)
+              : `${parlayLegsForMarket.length} legs`}
+          </span>
         </div>
       )}
       {/* Compact spacing - Professional look */}
@@ -248,13 +256,19 @@ function MarketCardComponent({
 
             {parlayMode ? (
               inParlay ? (
-                /* Already in slip — show which side was added */
                 <div className="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-500/20 border border-violet-500/30 text-violet-300 font-bold text-[10px] rounded-full whitespace-nowrap">
                   <Check className="w-3 h-3" />
                   Added
                 </div>
+              ) : outcomeInfo.hasMultiple ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onSelect?.(market); }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/30 text-violet-300 font-bold text-[10px] rounded-full transition-all whitespace-nowrap"
+                >
+                  <Layers className="w-2.5 h-2.5" />
+                  {outcomeInfo.count} Options
+                </button>
               ) : (
-                /* Parlay YES/NO quick buttons */
                 <div className="flex items-center gap-1">
                   <button
                     onClick={(e) => { e.stopPropagation(); onBuy(market, 'yes'); }}

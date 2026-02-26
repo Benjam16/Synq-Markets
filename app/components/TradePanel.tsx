@@ -25,7 +25,7 @@ interface TradePanelProps {
   onClose: () => void;
   onTrade: (market: Market, side: 'yes' | 'no', quantity: number) => void;
   parlayMode?: boolean;
-  onAddToParlay?: (market: Market, side: 'yes' | 'no', outcomeName?: string) => void;
+  onAddToParlay?: (market: Market, side: 'yes' | 'no', outcomeName?: string, outcomePrice?: number) => void;
 }
 
 export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, onClose, onTrade, parlayMode, onAddToParlay }: TradePanelProps) {
@@ -816,7 +816,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                         e.stopPropagation();
                                         e.preventDefault();
                                         if (parlayMode && onAddToParlay) {
-                                          onAddToParlay(mkt, 'yes');
+                                          onAddToParlay(mkt, 'yes', undefined, yesPrice);
                                         } else {
                                           setSelectedMarket(mkt);
                                           setSelectedOutcome(yesOutcome?.id || null);
@@ -850,7 +850,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                         e.stopPropagation();
                                         e.preventDefault();
                                         if (parlayMode && onAddToParlay) {
-                                          onAddToParlay(mkt, 'no');
+                                          onAddToParlay(mkt, 'no', undefined, noPrice);
                                         } else {
                                           setSelectedMarket(mkt);
                                           setSelectedOutcome(noOutcome?.id || null);
@@ -982,7 +982,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                               e.stopPropagation();
                                               e.preventDefault();
                                               if (parlayMode && onAddToParlay) {
-                                                onAddToParlay(mkt, 'yes', outcome.name);
+                                                onAddToParlay(mkt, 'yes', outcome.name, outcomePrice);
                                               } else {
                                                 setSelectedMarket(mkt);
                                                 setSelectedOutcome(outcome.id);
@@ -1005,7 +1005,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                               e.stopPropagation();
                                               e.preventDefault();
                                               if (parlayMode && onAddToParlay) {
-                                                onAddToParlay(mkt, 'no', outcome.name);
+                                                onAddToParlay(mkt, 'no', outcome.name, noPrice);
                                               } else {
                                                 setSelectedMarket(mkt);
                                                 setSelectedOutcome(outcome.id);

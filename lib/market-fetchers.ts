@@ -1073,8 +1073,8 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
                 return sum + (m.volume || 0);
               }, 0);
 
-              resolutionDate = firstMkt.expected_expiration_time ||
-                               firstMkt.close_time ||
+              resolutionDate = firstMkt.close_time ||
+                               firstMkt.expected_expiration_time ||
                                firstMkt.expiration_time || '';
 
               // 24h change

@@ -130,6 +130,61 @@ async function ensureMarketInfoMap(): Promise<void> {
         await new Promise(r => setTimeout(r, 50));
       }
       console.log(`[Terminal] Kalshi name map: ${m.size} entries from ${pagesFetched} pages`);
+
+      // ── 1b. Targeted fetch for fast crypto market events (KXBTC, KXETH, etc.) ──
+      const FAST_SERIES = ['KXBTC', 'KXETH', 'KXSOL', 'KXXRP', 'KXDOGE', 'KXAVAX', 'KXLINK', 'KXBNB'];
+      for (const series of FAST_SERIES) {
+        try {
+          const fastPath = '/trade-api/v2/events';
+          const fastParams = new URLSearchParams({
+            status: 'open',
+            limit: '50',
+            with_nested_markets: 'true',
+            series_ticker: series,
+          });
+          const fastAuth = generateKalshiHeaders('GET', fastPath, accessKey!, privateKey!);
+          const fastRes = await fetch(`${KALSHI_API_BASE}${fastPath}?${fastParams}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', ...fastAuth },
+            cache: 'no-store',
+          });
+          if (fastRes.ok) {
+            const fastData = await fastRes.json();
+            for (const event of (fastData.events || [])) {
+              const title = event.title || '';
+              if (!title) continue;
+              const eventTicker = event.event_ticker || '';
+              const seriesTicker = event.series_ticker || '';
+              const kalshiSlug = seriesTicker
+                ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
+                : eventTicker.toLowerCase();
+              let kalshiImg = '';
+              if (seriesTicker) {
+                kalshiImg = `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`;
+              }
+              const info: MarketInfo = {
+                name: title,
+                externalUrl: `https://kalshi.com/markets/${kalshiSlug}`,
+                category: 'Fast Markets',
+                imageUrl: kalshiImg,
+              };
+              if (eventTicker) m.set(eventTicker.toLowerCase(), info);
+              if (seriesTicker) m.set(seriesTicker.toLowerCase(), info);
+              for (const mkt of (event.markets || [])) {
+                if (mkt.ticker) {
+                  const rawTitle = mkt.title || mkt.subtitle || '';
+                  const mktTitle = rawTitle.replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim();
+                  const specificName = (mktTitle && mktTitle.toLowerCase() !== title.toLowerCase())
+                    ? `${mktTitle} – ${title}`
+                    : title;
+                  m.set(mkt.ticker.toLowerCase(), { ...info, name: specificName });
+                }
+              }
+            }
+          }
+        } catch { /* skip this series if it fails */ }
+      }
+      console.log(`[Terminal] After fast crypto fetch: ${m.size} entries total`);
     }
   } catch (err) {
     console.warn('[Terminal] Failed to build Kalshi name map:', err);
@@ -177,16 +232,26 @@ async function ensureMarketInfoMap(): Promise<void> {
     console.warn('[Terminal] Failed to build Polymarket name map:', err);
   }
 
-  // ── Tag "Up or Down" crypto entries in the map as 'Fast Markets' ────────
-  // Avoids a separate API call — just re-labels entries we already fetched.
+  // ── Tag fast crypto market entries as 'Fast Markets' ────────
   let fastTagCount = 0;
   const FAST_CRYPTO_KW = ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'xrp', 'doge', 'avax', 'link', 'bnb'];
+  const FAST_TICKER_PREFIXES = ['kxbtc', 'kxeth', 'kxsol', 'kxxrp', 'kxdoge', 'kxavax', 'kxlink', 'kxbnb', 'kxada', 'kxmatic', 'kxdot'];
   for (const [key, info] of m.entries()) {
+    if (info.category === 'Fast Markets') continue;
     const nameLower = info.name.toLowerCase();
-    if (
-      (nameLower.includes('up or down') || nameLower.includes('up/down')) &&
-      FAST_CRYPTO_KW.some(kw => nameLower.includes(kw))
-    ) {
+    const keyLower = key.toLowerCase();
+
+    const isFast =
+      // Pattern 1: "up or down" + crypto keyword
+      ((nameLower.includes('up or down') || nameLower.includes('up/down')) &&
+       FAST_CRYPTO_KW.some(kw => nameLower.includes(kw))) ||
+      // Pattern 2: Kalshi fast crypto ticker prefix (KXBTC-*, KXETH-*, etc.)
+      FAST_TICKER_PREFIXES.some(prefix => keyLower.startsWith(prefix)) ||
+      // Pattern 3: titles with time indicators + crypto keywords
+      ((nameLower.includes('15 min') || nameLower.includes('5 min') || nameLower.includes('15-min') || nameLower.includes('5-min')) &&
+       FAST_CRYPTO_KW.some(kw => nameLower.includes(kw)));
+
+    if (isFast) {
       m.set(key, { ...info, category: 'Fast Markets' });
       fastTagCount++;
     }
@@ -630,6 +695,12 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           || t.market_title || t.title || '';
         const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
 
+        // Detect fast market trades by ticker prefix even if not in map
+        const FAST_PREFIXES = ['KXBTC', 'KXETH', 'KXSOL', 'KXXRP', 'KXDOGE', 'KXAVAX', 'KXLINK', 'KXBNB'];
+        const tickerUpper = ticker.toUpperCase();
+        const isFastTicker = FAST_PREFIXES.some(p => tickerUpper.startsWith(p));
+        const category = resolvedInfo?.category || (isFastTicker ? 'Fast Markets' : '');
+
         return {
           id: `kalshi-${t.trade_id || `${Date.now()}-${idx}`}`,
           provider: 'Kalshi' as const,
@@ -645,7 +716,7 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           timestamp: t.created_time || t.executed_at || new Date().toISOString(),
           isWhale: notional >= WHALE_THRESHOLD,
           externalUrl,
-          category: resolvedInfo?.category || '',
+          category,
           imageUrl: resolvedInfo?.imageUrl || '',
         };
       })

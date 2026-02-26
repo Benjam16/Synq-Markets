@@ -19,6 +19,7 @@ export interface ParlayLeg {
   marketId: string;
   provider: string;
   outcome: 'yes' | 'no';
+  outcomeName?: string;
   price: number;
   marketName: string;
   status: 'pending' | 'won' | 'lost';
@@ -743,19 +744,26 @@ export default function MarketsPage() {
     return +(stakeNum * parlayMultiplier).toFixed(2);
   }, [parlayStake, parlayMultiplier]);
 
-  const addParlayLeg = useCallback((market: Market, outcome: 'yes' | 'no', outcomeName?: string) => {
+  const addParlayLeg = useCallback((market: Market, outcome: 'yes' | 'no', outcomeName?: string, outcomePrice?: number) => {
     if (parlayLegs.length >= 6) {
       toast.error('Maximum 6 legs per parlay');
       return;
     }
-    // Prevent duplicate market
-    if (parlayLegs.some(l => l.marketId === market.id)) {
-      // Toggle off if same market+outcome clicked again
-      setParlayLegs(prev => prev.filter(l => l.marketId !== market.id));
+    // Composite key: marketId + outcomeName + side for multi-outcome dedup
+    const legKey = outcomeName
+      ? `${market.id}::${outcomeName}::${outcome}`
+      : `${market.id}::${outcome}`;
+    const getLegKey = (l: ParlayLeg) => l.outcomeName
+      ? `${l.marketId}::${l.outcomeName}::${l.outcome}`
+      : `${l.marketId}::${l.outcome}`;
+
+    if (parlayLegs.some(l => getLegKey(l) === legKey)) {
+      setParlayLegs(prev => prev.filter(l => getLegKey(l) !== legKey));
       return;
     }
-    const price = outcome === 'yes' ? market.price : 1 - market.price;
-    const safeprice = Math.max(0.01, Math.min(0.99, price));
+    // Use actual outcome price when provided; fall back to market.price
+    const rawPrice = outcomePrice ?? (outcome === 'yes' ? market.price : 1 - market.price);
+    const safeprice = Math.max(0.01, Math.min(0.99, rawPrice));
     const displayName = outcomeName
       ? `${outcomeName} — ${market.eventTitle || market.name}`
       : (market.eventTitle || market.name);
@@ -765,6 +773,7 @@ export default function MarketsPage() {
         marketId: market.id,
         provider: market.provider || 'polymarket',
         outcome,
+        outcomeName,
         price: safeprice,
         marketName: displayName,
         status: 'pending',
@@ -773,8 +782,11 @@ export default function MarketsPage() {
     setParlaySlipOpen(true);
   }, [parlayLegs]);
 
-  const removeParlayLeg = useCallback((marketId: string) => {
-    setParlayLegs(prev => prev.filter(l => l.marketId !== marketId));
+  const removeParlayLeg = useCallback((legKey: string) => {
+    const getLegKey = (l: ParlayLeg) => l.outcomeName
+      ? `${l.marketId}::${l.outcomeName}::${l.outcome}`
+      : `${l.marketId}::${l.outcome}`;
+    setParlayLegs(prev => prev.filter(l => getLegKey(l) !== legKey));
   }, []);
 
   const clearParlay = useCallback(() => {
@@ -1108,8 +1120,8 @@ export default function MarketsPage() {
           <motion.div
             initial={{ y: 60, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 60, opacity: 0 }}
-            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-full bg-violet-950/90 border border-violet-500/30 backdrop-blur-xl shadow-2xl"
+            exit={{ y: 60, opacity: 0, transition: { duration: 0.15 } }}
+            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-full bg-violet-950/90 border border-violet-500/30 backdrop-blur-xl shadow-2xl pointer-events-auto"
           >
             <Layers className="w-3.5 h-3.5 text-violet-400" />
             <span className="text-[11px] font-bold text-violet-200">
@@ -1137,7 +1149,7 @@ export default function MarketsPage() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              exit={{ opacity: 0, transition: { duration: 0 } }}
               onClick={() => setParlaySlipOpen(false)}
               className="fixed inset-0 z-40 bg-black/20"
             />
@@ -1145,7 +1157,7 @@ export default function MarketsPage() {
             <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
-              exit={{ x: '100%' }}
+              exit={{ x: '100%', transition: { duration: 0.15 } }}
               transition={{ type: 'spring', stiffness: 400, damping: 40 }}
               className="fixed right-0 top-0 h-full w-full max-w-sm z-50 bg-[#09090F] border-l border-white/5 shadow-2xl flex flex-col"
             >
@@ -1179,35 +1191,40 @@ export default function MarketsPage() {
                     </p>
                   </div>
                 ) : (
-                  parlayLegs.map((leg, i) => (
-                    <motion.div
-                      key={leg.marketId}
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5"
-                    >
-                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/20 flex items-center justify-center">
-                        <span className="text-[9px] font-black text-violet-300">{i + 1}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] text-white font-medium truncate">{leg.marketName}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${
-                            leg.outcome === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                          }`}>{leg.outcome}</span>
-                          <span className="text-[10px] text-slate-400">${leg.price.toFixed(2)}</span>
-                          <span className="text-[10px] text-slate-500">{(1 / leg.price).toFixed(2)}x</span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => removeParlayLeg(leg.marketId)}
-                        className="text-slate-600 hover:text-red-400 transition-colors flex-shrink-0"
+                  parlayLegs.map((leg, i) => {
+                    const legKey = leg.outcomeName
+                      ? `${leg.marketId}::${leg.outcomeName}::${leg.outcome}`
+                      : `${leg.marketId}::${leg.outcome}`;
+                    return (
+                      <motion.div
+                        key={legKey}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 20 }}
+                        className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5"
                       >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </motion.div>
-                  ))
+                        <div className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/20 flex items-center justify-center">
+                          <span className="text-[9px] font-black text-violet-300">{i + 1}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] text-white font-medium truncate">{leg.marketName}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${
+                              leg.outcome === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                            }`}>{leg.outcome}</span>
+                            <span className="text-[10px] text-slate-400">${leg.price.toFixed(2)}</span>
+                            <span className="text-[10px] text-slate-500">{(1 / leg.price).toFixed(2)}x</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removeParlayLeg(legKey)}
+                          className="text-slate-600 hover:text-red-400 transition-colors flex-shrink-0"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </motion.div>
+                    );
+                  })
                 )}
 
                 {parlayLegs.length > 0 && parlayLegs.length < 6 && parlayMode && (
@@ -1312,8 +1329,8 @@ export default function MarketsPage() {
             setSelectedEvent(null);
           }}
           parlayMode={parlayMode}
-          onAddToParlay={(market, side, outcomeName) => {
-            addParlayLeg(market, side, outcomeName);
+          onAddToParlay={(market, side, outcomeName, outcomePrice) => {
+            addParlayLeg(market, side, outcomeName, outcomePrice);
             setParlaySlipOpen(true);
           }}
           onTrade={() => {
