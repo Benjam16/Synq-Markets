@@ -41,6 +41,8 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [userPositions, setUserPositions] = useState<any[]>([]); // User's open positions for this market
   const [tradeStatus, setTradeStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle'); // Optimistic trade state
+  const [stopLossEnabled, setStopLossEnabled] = useState(false);
+  const [stopLossCents, setStopLossCents] = useState<string>('');
   const { user } = useAuth();
   const dataInitializedRef = useRef(false); // Track if initial data has been loaded
   const lastUpdateTimeRef = useRef<number>(0); // Track last update timestamp
@@ -432,6 +434,9 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
           quantity: Number(quantity),
           marketName: selectedMarket.eventTitle || selectedMarket.name || displayTitle,
           category: selectedMarket.category || 'General',
+          ...(tradeType === 'buy' && stopLossEnabled && Number(stopLossCents) > 0
+            ? { stopLossCents: Number(stopLossCents) }
+            : {}),
         }),
       });
 
@@ -1253,7 +1258,55 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                           </span>
                         </div>
                       </div>
-                      
+
+                      {/* ── Stop Loss ── */}
+                      {tradeType === 'buy' && (
+                        <div className="p-4 bg-slate-950/50 backdrop-blur-md border border-white/5 rounded-lg">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                              <span className="text-amber-400">🛡</span>
+                              Stop Loss
+                              <span className="text-[10px] text-slate-500 font-normal">optional</span>
+                            </label>
+                            {/* Toggle */}
+                            <button
+                              type="button"
+                              onClick={() => setStopLossEnabled(!stopLossEnabled)}
+                              className={`relative inline-flex items-center h-5 w-9 rounded-full transition-colors focus:outline-none ${
+                                stopLossEnabled ? 'bg-amber-400/80' : 'bg-slate-700'
+                              }`}
+                            >
+                              <span className={`inline-block w-3.5 h-3.5 rounded-full bg-white transform transition-transform shadow-sm ${
+                                stopLossEnabled ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                              }`} />
+                            </button>
+                          </div>
+                          {stopLossEnabled && (
+                            <div className="mt-2 space-y-2">
+                              <p className="text-xs text-slate-500">Auto-sell if price drops to or below:</p>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  value={stopLossCents}
+                                  onChange={(e) => setStopLossCents(e.target.value)}
+                                  min="1"
+                                  max="99"
+                                  step="1"
+                                  placeholder={`e.g. ${Math.max(1, Math.floor((currentPrice * 100) * 0.8))}`}
+                                  className="flex-1 px-3 py-2 bg-slate-900 border border-amber-400/20 rounded-lg text-white text-sm font-mono focus:outline-none focus:border-amber-400/50"
+                                />
+                                <span className="text-sm text-slate-400 font-mono">¢</span>
+                              </div>
+                              {Number(stopLossCents) > 0 && currentPrice > 0 && (
+                                <p className="text-xs text-amber-400/70">
+                                  Current: {(currentPrice * 100).toFixed(0)}¢ · Max loss: ~${Math.max(0, (currentPrice - Number(stopLossCents) / 100) * Number(quantity || 0)).toFixed(2)}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <motion.button
                         onClick={handleTrade}
                         disabled={!user || Number(quantity) <= 0 || !selectedOutcome || tradeStatus === 'processing'}

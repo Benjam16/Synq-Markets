@@ -227,6 +227,7 @@ export default function TerminalPage() {
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterWhaleOnly, setFilterWhaleOnly] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
+  const [filterTradeTier, setFilterTradeTier] = useState<'all' | 'low' | 'medium' | 'high'>('all');
   const [showFilters, setShowFilters] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
@@ -722,13 +723,17 @@ export default function TerminalPage() {
     if (filterCategory !== 'all' && t.category && t.category.toLowerCase() !== filterCategory.toLowerCase()) return false;
     // Whale only
     if (filterWhaleOnly && !t.isWhale) return false;
+    // Trade size tier filter
+    if (filterTradeTier === 'low' && t.notional > 250) return false;
+    if (filterTradeTier === 'medium' && (t.notional <= 250 || t.notional > 3000)) return false;
+    if (filterTradeTier === 'high' && t.notional <= 3000) return false;
     // Search
     if (filterSearch) {
       const q = filterSearch.toLowerCase();
       if (!t.marketName.toLowerCase().includes(q) && !t.marketId.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [trades, liveSubTab, filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch]);
+  }), [trades, liveSubTab, filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch, filterTradeTier]);
 
   // Count active filters for badge
   const activeFilterCount = useMemo(() => {
@@ -740,6 +745,7 @@ export default function TerminalPage() {
     if (filterCategory !== 'all') count++;
     if (filterWhaleOnly) count++;
     if (filterSearch) count++;
+    if (filterTradeTier !== 'all') count++;
     return count;
   }, [filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch]);
 
@@ -751,6 +757,7 @@ export default function TerminalPage() {
     setFilterCategory('all');
     setFilterWhaleOnly(false);
     setFilterSearch('');
+    setFilterTradeTier('all');
   }, []);
 
   // ── Activity Heatmap (last 60 seconds) ──
@@ -1447,6 +1454,31 @@ export default function TerminalPage() {
                                   onClick={() => setFilterMinNotional(v)}
                                   className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
                                     filterMinNotional === v
+                                      ? 'bg-[#7B61FF]/20 text-[#7B61FF] border border-[#7B61FF]/30'
+                                      : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Trade Size Tier */}
+                          <div className="mb-3">
+                            <label className="text-[9px] text-slate-500 uppercase tracking-wider mb-1.5 block">Trade Size</label>
+                            <div className="flex gap-1.5 flex-wrap">
+                              {[
+                                { v: 'all' as const, label: 'All' },
+                                { v: 'low' as const, label: 'Small ≤$250' },
+                                { v: 'medium' as const, label: '$251–$3K' },
+                                { v: 'high' as const, label: '$3K+' },
+                              ].map(({ v, label }) => (
+                                <button
+                                  key={v}
+                                  onClick={() => setFilterTradeTier(v)}
+                                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                                    filterTradeTier === v
                                       ? 'bg-[#7B61FF]/20 text-[#7B61FF] border border-[#7B61FF]/30'
                                       : 'bg-white/5 text-slate-400 hover:text-white border border-transparent'
                                   }`}

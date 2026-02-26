@@ -1071,8 +1071,11 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
                 }
                 yesPrice = Math.max(0.01, Math.min(0.99, yesPrice));
 
-                // Outcome name: use subtitle or title (cleaned)
-                let outcomeName = m.subtitle || m.yes_sub_title || m.title || '';
+                // Outcome name: use subtitle or title (cleaned of Kalshi's raw :: prefix)
+                let outcomeName = (m.subtitle || m.yes_sub_title || m.title || '')
+                  .replace(/^::\s*/g, '')   // strip leading ::
+                  .replace(/^--\s*/g, '')   // strip leading --
+                  .trim();
                 if (!outcomeName || outcomeName === title) {
                   outcomeName = event.mutually_exclusive ? `Option ${idx + 1}` : 'Yes';
                 }

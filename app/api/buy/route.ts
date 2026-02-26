@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
   const outcome = String(body.outcome || side); // Store outcome name (e.g., "Gavin Newsom")
   const quantity = Number(body.quantity);
   const currentOutcome = body.currentOutcome || null;
+  const stopLossCents = body.stopLossCents ? Number(body.stopLossCents) : null;
 
   if (!userId || !marketId || !provider || Number.isNaN(quantity)) {
     return NextResponse.json(
@@ -292,6 +293,25 @@ export async function POST(req: NextRequest) {
       balanceAfter,
       balanceChange: -cost,
     });
+
+    // Create stop-loss order if requested (async, non-blocking)
+    if (stopLossCents && stopLossCents > 0 && stopLossCents < 100 && tradeRes.rows[0]?.id) {
+      fetch(`${req.nextUrl.origin}/api/stop-loss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          tradeId: tradeRes.rows[0].id,
+          marketId,
+          provider,
+          side,
+          outcome: cleanOutcome,
+          stopPriceCents: stopLossCents,
+          quantity,
+          marketName: body.marketName || null,
+        }),
+      }).catch((err) => console.warn('[Buy] Stop-loss creation failed:', err));
+    }
 
     // Run risk check after trade (async, don't wait)
     fetch(`${req.nextUrl.origin}/api/risk-check`, {

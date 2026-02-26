@@ -108,7 +108,9 @@ async function ensureMarketInfoMap(): Promise<void> {
           // e.g. "Leonardo DiCaprio – Oscars 2026: Best Actor Winner"
           for (const mkt of (event.markets || [])) {
             if (mkt.ticker) {
-              const mktTitle = mkt.title || mkt.subtitle || '';
+              // Clean Kalshi's raw `::` / `--` prefix from subtitle fields
+              const rawTitle = mkt.title || mkt.subtitle || '';
+              const mktTitle = rawTitle.replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim();
               // If the market has its own distinct title, combine it with the event title
               const specificName = (mktTitle && mktTitle.toLowerCase() !== title.toLowerCase())
                 ? `${mktTitle} – ${title}`
@@ -389,6 +391,55 @@ const priceMap = new Map<string, number>();
 // Rotating offset for synthetic trades so different markets appear each poll
 let _polyEventOffset = 0;
 let _kalshiEventOffset = 0;
+
+// ── Tiered share generator ──────────────────────────────────────────────────
+// Generates a share count that produces a notional in a specific tier.
+function tieredShares(price: number, tier: 'low' | 'medium' | 'high'): number {
+  const safePx = Math.max(0.01, price);
+  let minNotional: number, maxNotional: number;
+  if (tier === 'low')    { minNotional = 5;    maxNotional = 250;   }
+  else if (tier === 'medium') { minNotional = 251;  maxNotional = 3000;  }
+  else                   { minNotional = 3001; maxNotional = 15000; }
+  const notional = minNotional + Math.random() * (maxNotional - minNotional);
+  return Math.max(1, Math.round(notional / safePx));
+}
+
+// ── Generates synthetic trades for a specific notional tier from the info map ──
+function generateSyntheticTrades(count: number, tier: 'low' | 'medium' | 'high', baseTs: number): TerminalTrade[] {
+  if (_marketInfoMap.size === 0) return [];
+  const entries = Array.from(_marketInfoMap.entries());
+  if (entries.length === 0) return [];
+  const trades: TerminalTrade[] = [];
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(Math.random() * entries.length);
+    const [ticker, info] = entries[idx];
+    if (!info.name || info.name.length < 3) continue;
+    const isKalshi = info.externalUrl?.includes('kalshi.com');
+    if (isKalshi && isKalshiSportsTicker(ticker.toUpperCase())) continue;
+    const price = 0.08 + Math.random() * 0.84;
+    const shares = tieredShares(price, tier);
+    const notional = price * shares;
+    trades.push({
+      id: `syn-${tier}-${baseTs}-${i}-${Math.random().toString(36).slice(2, 7)}`,
+      provider: isKalshi ? 'Kalshi' : 'Polymarket',
+      type: Math.random() > 0.5 ? 'FILL' : 'ORDER',
+      marketId: ticker,
+      marketName: info.name,
+      side: Math.random() > 0.4 ? 'Yes' : 'No',
+      price,
+      priceCents: `${(price * 100).toFixed(1)}¢`,
+      shares,
+      notional,
+      fee: Math.round(notional * 0.02 * 100) / 100,
+      timestamp: new Date(baseTs - i * 37).toISOString(),
+      isWhale: notional >= WHALE_THRESHOLD,
+      externalUrl: info.externalUrl,
+      category: info.category || '',
+      imageUrl: info.imageUrl || '',
+    });
+  }
+  return trades;
+}
 
 async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
   try {
@@ -810,14 +861,31 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     fetchMarketTicks(),
   ]);
 
-  // Combine and randomly shuffle — no blocks, Poly/Kalshi appear naturally mixed
-  const allTrades: TerminalTrade[] = [...polyTrades, ...kalshiTrades];
-  // Fisher-Yates shuffle for true random ordering
+  // ── Tier-stratified assembly: 100 low ($0-$250) + 100 medium ($251-$3K) + 100 high ($3K+) ──
+  const PER_TIER = 100;
+  const baseTs = Date.now();
+  const combined = [...polyTrades, ...kalshiTrades];
+
+  const realLow  = combined.filter(t => t.notional <= 250);
+  const realMid  = combined.filter(t => t.notional > 250 && t.notional <= 3000);
+  const realHigh = combined.filter(t => t.notional > 3000);
+
+  const synLow  = realLow.length  < PER_TIER ? generateSyntheticTrades(PER_TIER - realLow.length,  'low',    baseTs) : [];
+  const synMid  = realMid.length  < PER_TIER ? generateSyntheticTrades(PER_TIER - realMid.length,  'medium', baseTs) : [];
+  const synHigh = realHigh.length < PER_TIER ? generateSyntheticTrades(PER_TIER - realHigh.length, 'high',   baseTs) : [];
+
+  const allTrades: TerminalTrade[] = [
+    ...realLow.slice(0, PER_TIER),  ...synLow,
+    ...realMid.slice(0, PER_TIER),  ...synMid,
+    ...realHigh.slice(0, PER_TIER), ...synHigh,
+  ];
+
+  // Fisher-Yates shuffle so tiers don't appear as blocks
   for (let i = allTrades.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [allTrades[i], allTrades[j]] = [allTrades[j], allTrades[i]];
   }
-  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi = ${allTrades.length} shuffled`);
+  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi → low:${realLow.length}+${synLow.length} mid:${realMid.length}+${synMid.length} high:${realHigh.length}+${synHigh.length} = ${allTrades.length}`);
 
   // Update caches
   const existingIds = new Set(tradeCache.map(t => t.id));

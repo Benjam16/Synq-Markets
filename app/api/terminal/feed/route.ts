@@ -14,9 +14,13 @@ import { getTerminalSnapshot } from '@/lib/terminal-engine';
 export const revalidate = 0;
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const snapshot = await getTerminalSnapshot();
+
+    // Fire stop-loss check in the background (non-blocking, runs at most every 10s)
+    const origin = new URL(req.url).origin;
+    fetch(`${origin}/api/cron/stop-loss-check`).catch(() => {});
 
     return NextResponse.json(snapshot, {
       headers: {
