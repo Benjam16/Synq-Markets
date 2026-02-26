@@ -98,7 +98,6 @@ export default function MarketsPage() {
       
       try {
         const isInitial = !initialLoadComplete;
-        console.log(`[Markets Page] ${isInitial ? 'Initial' : 'Refresh'} load started...`);
         
         // Fetch ALL markets (no limit or very high limit)
         // Don't use abort signal on initial load to prevent cancellation
@@ -116,14 +115,12 @@ export default function MarketsPage() {
         const res = await fetch(`/api/markets?limit=5000&_t=${Date.now()}`, fetchOptions);
         
         if (!mounted) {
-          console.log('[Markets Page] Component unmounted, skipping state update');
           return;
         }
         
         if (res.ok) {
           const data = await res.json();
           const marketsCount = data.markets?.length || 0;
-          console.log(`[Markets Page] ✅ Received ${marketsCount} markets from API`);
           
           if (data.error) {
             console.error(`[Markets Page] API error:`, data.error);
@@ -132,9 +129,7 @@ export default function MarketsPage() {
           // Always update markets if we got data
           if (marketsCount > 0) {
             setMarkets(data.markets);
-            console.log(`[Markets Page] ✅ Set ${marketsCount} markets in state`);
           } else {
-            console.warn(`[Markets Page] ⚠️ Received 0 markets from API`);
             // Only clear on initial load if we get 0 markets
             if (isInitial) {
               setMarkets([]);
@@ -150,7 +145,6 @@ export default function MarketsPage() {
         // Ignore aborted requests (navigation cancelled them) - but log for debugging
         if (error?.name === 'AbortError') {
           const isInitial = !initialLoadComplete;
-          console.log(`[Markets Page] Request aborted ${isInitial ? '(unexpected on initial load!)' : '(navigation)'}`);
           // On initial load, abort shouldn't happen - this is a problem
           if (isInitial) {
             console.error('[Markets Page] ⚠️ Initial load was aborted! This should not happen.');
@@ -226,7 +220,7 @@ export default function MarketsPage() {
   // ── Build Fast tab from BOTH fast API + client-side filter of main markets
   const combinedFastMarkets = useMemo(() => {
     const CRYPTO_KW = ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'xrp', 'doge', 'avax', 'link', 'bnb', 'hyperliquid'];
-    const nowMs = Date.now();
+    const nowMs = now; // reactive timestamp updated every second
     const in24h = nowMs + 24 * 60 * 60 * 1000;
     // Client-side filter: "Up or Down" crypto markets resolving within 24 hours AND not yet resolved
     const fromMain = markets.filter(m => {
@@ -238,26 +232,22 @@ export default function MarketsPage() {
       if (m.resolutionDate) {
         try {
           const resMs = new Date(m.resolutionDate).getTime();
-          // Exclude already-resolved markets (60s grace) and far-future markets
-          if (resMs < nowMs - 60_000) return false;
+          if (resMs < nowMs) return false; // already past resolution
           if (resMs > in24h) return false;
         } catch { /* keep */ }
       }
       return true;
     });
-    // Merge with fast API results, deduplicate by id
+    // Merge with fast API results, deduplicate by id — drop anything already resolved
     const seen = new Set<string>();
     const merged: Market[] = [];
     for (const m of [...fastMarkets, ...fromMain]) {
-      if (!m.resolutionDate) {
-        if (!seen.has(m.id)) { seen.add(m.id); merged.push(m); }
-        continue;
+      if (m.resolutionDate) {
+        try {
+          const resMs = new Date(m.resolutionDate).getTime();
+          if (resMs < nowMs) continue; // resolved — drop immediately
+        } catch { /* keep */ }
       }
-      try {
-        const resMs = new Date(m.resolutionDate).getTime();
-        // Skip already-resolved markets (60s grace period)
-        if (resMs < nowMs - 60_000) continue;
-      } catch { /* keep */ }
       if (!seen.has(m.id)) { seen.add(m.id); merged.push(m); }
     }
     // Sort: soonest-resolving first so traders see the most urgent markets
@@ -293,35 +283,7 @@ export default function MarketsPage() {
       }));
     }
 
-    // Debug: Log total markets and category distribution
-    if (markets.length > 0) {
-      const categoryCounts: Record<string, number> = {};
-      markets.forEach((m: any) => {
-        const cat = (m.category || 'General').toLowerCase();
-        categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
-      });
-      console.log(`[Markets Page] Total markets: ${markets.length} | Categories:`, categoryCounts);
-      
-      if (selectedCategory === 'Breaking') {
-        const cryptoCount = markets.filter(m => {
-          const name = (m.name || '').toLowerCase();
-          const cat = (m.category || '').toLowerCase();
-          return cat === 'crypto' || name.includes('bitcoin') || name.includes('btc') || 
-                 name.includes('ethereum') || name.includes('eth') || name.includes('crypto');
-        }).length;
-        const sportsCount = markets.filter(m => {
-          const name = (m.name || '').toLowerCase();
-          const cat = (m.category || '').toLowerCase();
-          return cat === 'sports' || name.includes('nba') || name.includes('nfl') || 
-                 name.includes('nhl') || name.includes('mlb') || name.includes('soccer');
-        }).length;
-        console.log(`[Breaking Debug] Crypto: ${cryptoCount} | Sports: ${sportsCount}`);
-      }
-    } else {
-      console.warn(`[Markets Page] No markets available!`);
-    }
-    
-    // First filter markets
+    // Filter markets
     let filtered = markets.filter(m => {
       // Source filter (Polymarket / Kalshi / All)
       if (sourceFilter !== 'All' && m.provider !== sourceFilter) return false;
@@ -522,10 +484,7 @@ export default function MarketsPage() {
         // This ensures we show ALL crypto and sports, not just same-day ones
         matchesCat = isCrypto || isSports || (isHighVolume && !isLongTermChampionship);
         
-        // Debug: Log if we found short-term/same-day markets
-        if (matchesCat && (isShortTermCrypto || isSameDaySports)) {
-          console.log(`[Breaking] Found ${isShortTermCrypto ? 'short-term crypto' : ''} ${isSameDaySports ? 'same-day sports' : ''} market: "${m.name?.substring(0, 60)}"`);
-        }
+        
       } else if (selectedCategory === 'Fast') {
         // Fast tab uses fastMarkets state — this branch never matches from `markets`
         matchesCat = false;
@@ -562,7 +521,7 @@ export default function MarketsPage() {
             'world': ['geopolitics', 'geopolitical', 'international'],
             'tech': ['technology', 'tech'],
             'crypto': ['cryptocurrency', 'cryptocurrencies'],
-            'sports': ['sport'],
+            'sports': ['sport', 'nba', 'nfl', 'nhl', 'mlb', 'soccer', 'football', 'basketball', 'hockey', 'baseball', 'tennis', 'golf', 'mma', 'ufc', 'boxing'],
             'culture': ['entertainment'],
             'elections': ['election', 'political'],
             'politics': ['political', 'election'],
@@ -576,22 +535,6 @@ export default function MarketsPage() {
       return matchesSearch && matchesCat;
     });
     
-    // Debug: Log category distribution of filtered markets
-    const filteredCategoryCounts: Record<string, number> = {};
-    filtered.forEach((m: any) => {
-      const cat = (m.category || 'General').toLowerCase();
-      filteredCategoryCounts[cat] = (filteredCategoryCounts[cat] || 0) + 1;
-    });
-    console.log(`[Markets Page] After filtering for "${selectedCategory}": ${filtered.length} markets`);
-    console.log(`[Markets Page] Filtered category distribution:`, filteredCategoryCounts);
-    
-    // Debug: Show sample market categories for troubleshooting
-    if (filtered.length === 0 && markets.length > 0) {
-      const sampleCategories = Array.from(new Set(markets.slice(0, 20).map((m: any) => m.category || 'General')));
-      console.warn(`[Markets Page] No markets matched "${selectedCategory}". Sample categories in data:`, sampleCategories);
-    }
-
-    // Group by event slug (or eventTitle if slug not available)
     const grouped = new Map<string, Market[]>();
     filtered.forEach(market => {
       const key = market.slug || market.eventTitle || market.id;
@@ -600,8 +543,6 @@ export default function MarketsPage() {
       }
       grouped.get(key)!.push(market);
     });
-    
-    console.log(`[Markets Page] Grouped into ${grouped.size} event groups`);
 
     // Convert to array and sort by total volume (sum of all markets in event)
     return Array.from(grouped.entries())
@@ -1145,14 +1086,16 @@ export default function MarketsPage() {
                   parlayLegs={parlayLegs}
                 />
                 {/* Countdown badge pinned to bottom bar for fast markets */}
-                {selectedCategory === 'Fast' && eventGroup.mainMarket.resolutionDate && (
-                  <div className="absolute bottom-[13px] left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 backdrop-blur-sm">
-                    <Timer className="w-2.5 h-2.5 text-amber-400" />
-                    <span className="text-amber-400 text-[10px] font-mono font-bold whitespace-nowrap">
-                      {getCountdown(eventGroup.mainMarket.resolutionDate)}
-                    </span>
-                  </div>
-                )}
+                {selectedCategory === 'Fast' && eventGroup.mainMarket.resolutionDate && (() => {
+                  const cd = getCountdown(eventGroup.mainMarket.resolutionDate);
+                  if (!cd || cd === 'Resolving…') return null;
+                  return (
+                    <div className="absolute bottom-[13px] left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 backdrop-blur-sm">
+                      <Timer className="w-2.5 h-2.5 text-amber-400" />
+                      <span className="text-amber-400 text-[10px] font-mono font-bold whitespace-nowrap">{cd}</span>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           />

@@ -4,7 +4,9 @@ export interface MarketOutcome {
   id: string;
   name: string;
   price: number; 
-  tokenId?: string; 
+  tokenId?: string;
+  settled?: boolean;
+  settledResult?: string;
 }
 
 export interface UnifiedMarket {
@@ -41,13 +43,13 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
     let hasMore = true;
     let batchCount = 0;
     
-    console.log(`[Polymarket] Starting recursive pagination (safety limit: ${safetyLimit} items)`);
+    // Recursive pagination
     
     while (hasMore && allRawEvents.length < safetyLimit) {
       // Construct URL with offset parameter
       const url = `https://gamma-api.polymarket.com/events?active=true&closed=false&limit=${batchSize}&offset=${offset}&order=volume&ascending=false`;
       
-      console.log(`[Polymarket] Fetching batch ${batchCount + 1} at offset ${offset}...`);
+      // Fetching batch at offset
       
       const response = await fetch(url, { 
         method: 'GET', 
@@ -62,18 +64,7 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
       
       const batchEvents = await response.json();
       
-      // Debug: Log raw response structure to understand API format
-      if (batchCount === 0) {
-        console.log(`[Polymarket] First batch response structure:`, {
-          isArray: Array.isArray(batchEvents),
-          hasData: !!batchEvents?.data,
-          hasEvents: !!batchEvents?.events,
-          hasResults: !!batchEvents?.results,
-          keys: Object.keys(batchEvents || {}),
-          dataLength: Array.isArray(batchEvents?.data) ? batchEvents.data.length : 'N/A',
-          eventsLength: Array.isArray(batchEvents?.events) ? batchEvents.events.length : 'N/A',
-        });
-      }
+      
       
       // Handle different response formats
       let events: any[] = [];
@@ -87,27 +78,15 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
         events = batchEvents.results;
       }
       
-      // If we got no events, we've reached the end
       if (events.length === 0) {
-        console.log(`[Polymarket] No events returned at offset ${offset}, pagination complete`);
         hasMore = false;
         break;
       }
       
-      // Concatenate results into allRawEvents array
       allRawEvents.push(...events);
       batchCount++;
       
-      console.log(`[Polymarket] Batch ${batchCount}: Received ${events.length} events (Total: ${allRawEvents.length})`);
-      
-      // IMPORTANT: Continue pagination even if we got fewer than batchSize
-      // The API might return fewer items per page, but there could be more pages
-      // Only stop if we got exactly 0 events (which we already handled above)
-      // OR if we've hit the safety limit
-      
-      // If we got fewer than batchSize, try one more page to be sure
       if (events.length < batchSize) {
-        console.log(`[Polymarket] Received ${events.length} events (< ${batchSize}), checking for more pages...`);
         // Try fetching next page to see if there's more data
         const nextOffset = offset + batchSize;
         const nextUrl = `https://gamma-api.polymarket.com/events?active=true&closed=false&limit=${batchSize}&offset=${nextOffset}&order=volume&ascending=false`;
@@ -133,20 +112,16 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
             }
             
             if (nextEvents.length > 0) {
-              console.log(`[Polymarket] Found ${nextEvents.length} more events on next page, continuing pagination...`);
-              // Don't break - continue the loop to fetch this page properly
+              // more pages exist
             } else {
-              console.log(`[Polymarket] Next page is empty, pagination complete`);
               hasMore = false;
               break;
             }
           } else {
-            console.log(`[Polymarket] Next page request failed (${nextResponse.status}), assuming pagination complete`);
             hasMore = false;
             break;
           }
         } catch (e) {
-          console.log(`[Polymarket] Error checking next page:`, e);
           hasMore = false;
           break;
         }
@@ -155,9 +130,7 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
       // Update offset for next iteration
       offset += batchSize;
       
-      // Check safety limit
       if (allRawEvents.length >= safetyLimit) {
-        console.log(`[Polymarket] Reached safety limit of ${safetyLimit} items, stopping pagination`);
         hasMore = false;
         break;
       }
@@ -166,7 +139,6 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     
-    console.log(`[Polymarket] Pagination complete: Fetched ${allRawEvents.length} total events across ${batchCount} batches`);
     const rawEvents = allRawEvents;
 
     const processed = rawEvents.map((event: any) => {
@@ -612,12 +584,24 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
                  allText.includes("super bowl") || allText.includes("stanley cup") || allText.includes("world series") ||
                  allText.includes("olympics") || allText.includes("esports") || allText.includes("gaming") ||
                  allText.includes("tennis") || allText.includes("golf") || allText.includes("mma") ||
-                 allText.includes("ufc") || allText.includes("boxing") || allText.includes("soccer") ||
+                 allText.includes("ufc") || allText.includes("boxing") ||
                  allText.includes("premier league") || allText.includes("champions league") || allText.includes("ncaa") ||
                  allText.includes("college") || allText.includes("playoff") || allText.includes("championship") ||
                  allText.includes("game") || allText.includes("match") || allText.includes("tournament") ||
                  allText.includes("presidents' trophy") || allText.includes("division winner") ||
-                 allText.includes("draft") || allText.includes("wrexham") || allText.includes("fifa")) {
+                 allText.includes("draft") || allText.includes("wrexham") || allText.includes("fifa") ||
+                 allText.includes("over/under") || allText.includes("over under") ||
+                 allText.includes("spread") || allText.includes("moneyline") || allText.includes("total points") ||
+                 allText.includes("f1") || allText.includes("formula 1") || allText.includes("formula one") ||
+                 allText.includes("cricket") || allText.includes("rugby") || allText.includes("la liga") ||
+                 allText.includes("serie a") || allText.includes("bundesliga") || allText.includes("ligue 1") ||
+                 allText.includes("europa league") || allText.includes("world cup") ||
+                 allText.includes("points") || allText.includes("rebounds") || allText.includes("assists") ||
+                 allText.includes("touchdowns") || allText.includes("yards") || allText.includes("goals") ||
+                 allText.includes("home run") || allText.includes("strikeout") || allText.includes("rushing") ||
+                 allText.includes("passing") || allText.includes("mvp") || allText.includes("pga") ||
+                 allText.includes("wnba") || allText.includes("mls") || allText.includes("wwe") ||
+                 allText.includes("nascar")) {
         detectedCategory = "Sports";
       }
       // Finance detection (comprehensive) - check ALL text
@@ -741,10 +725,7 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
         category = categoryMap[category] || category;
       }
       
-      // Log category assignment for debugging (only for first few markets)
-      if (rawEvents.indexOf(event) < 5) {
-        console.log(`[Category] Event: "${event.title?.substring(0, 50)}" -> Category: "${category}"`);
-      }
+      
 
       return {
         id: m.id || event.id,
@@ -800,36 +781,8 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
         return true;
       });
     
-    // Count markets by category for debugging
-    const categoryCounts: Record<string, number> = {};
-    let upOrDownCount = 0;
-    let timeRangeCount = 0;
-    filtered.forEach((m: any) => {
-      const cat = m.category || 'General';
-      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
-      
-      // Count "Up or Down" markets
-      const name = (m.name || '').toLowerCase();
-      if (name.includes('up or down') || name.includes('up/down')) {
-        upOrDownCount++;
-      }
-      
-      // Count time-range markets (e.g., "6:00AM-6:15AM ET")
-      if (name.includes(':') && name.includes('et') && (name.includes('-') || name.includes(' to '))) {
-        timeRangeCount++;
-      }
-    });
-    
-    console.log(`[Polymarket] Processed ${processed.length} events, ${filtered.length} valid markets after filtering`);
-    console.log(`[Polymarket] Category distribution:`, categoryCounts);
-    console.log(`[Polymarket] "Up or Down" markets: ${upOrDownCount}, Time-range markets: ${timeRangeCount}`);
-    
-    // FINAL SORT: Sort by volume descending (highest first) to ensure Trending markets remain at the top
-    // This is critical for maintaining proper market ordering after multi-page pagination
     const sortedMarkets = filtered.sort((a: any, b: any) => b.volume - a.volume);
-    
-    console.log(`[Polymarket] Final sorted markets: ${sortedMarkets.length} (Top 10 volumes: ${sortedMarkets.slice(0, 10).map((m: any) => m.volume).join(', ')})`);
-    
+    console.log(`[Polymarket] ${sortedMarkets.length} markets fetched`);
     return sortedMarkets;
 
   } catch (error) {
@@ -874,11 +827,17 @@ function mapKalshiCategory(event: any): string {
       ticker.startsWith('KXSOCCER') || ticker.startsWith('KXUFC') || ticker.startsWith('KXMMA') ||
       ticker.startsWith('KXPGA') || ticker.startsWith('KXTENNIS') || ticker.startsWith('KXEPL') ||
       ticker.startsWith('KXUCL') || ticker.startsWith('KXLIGUE') || ticker.startsWith('KXLALIGA') ||
-      ticker.startsWith('KXBUND') || ticker.startsWith('KXSERIE')) {
+      ticker.startsWith('KXBUND') || ticker.startsWith('KXSERIE') ||
+      ticker.startsWith('KXWNBA') || ticker.startsWith('KXMLS') || ticker.startsWith('KXF1') ||
+      ticker.startsWith('KXCRICKET') || ticker.startsWith('KXRUGBY') || ticker.startsWith('KXNASCAR') ||
+      ticker.startsWith('KXWWE') || ticker.startsWith('KXOLYMPIC') || ticker.startsWith('KXCFB') ||
+      ticker.startsWith('KXCBB') || ticker.startsWith('KXWC')) {
     return 'Sports';
   }
   if (ticker.startsWith('KXBTC') || ticker.startsWith('KXETH') || ticker.startsWith('KXSOL') ||
-      ticker.startsWith('KXCRYPTO')) {
+      ticker.startsWith('KXCRYPTO') || ticker.startsWith('KXDOGE') || ticker.startsWith('KXXRP') ||
+      ticker.startsWith('KXAVAX') || ticker.startsWith('KXLINK') || ticker.startsWith('KXBNB') ||
+      ticker.startsWith('KXADA') || ticker.startsWith('KXDOT') || ticker.startsWith('KXHYPE')) {
     return 'Crypto';
   }
   if (ticker.startsWith('KXFED') || ticker.startsWith('KXCPI') || ticker.startsWith('KXGDP') ||
@@ -907,7 +866,14 @@ function mapKalshiCategory(event: any): string {
       title.includes('premier league') || title.includes('champions league') ||
       title.includes('ncaa') || title.includes('college') || title.includes('draft') ||
       title.includes('mvp') || title.includes('season') || title.includes('series') ||
-      title.includes('olympic')) {
+      title.includes('olympic') || title.includes('wnba') || title.includes('mls') ||
+      title.includes('f1 ') || title.includes('formula 1') || title.includes('nascar') ||
+      title.includes('cricket') || title.includes('rugby') || title.includes('la liga') ||
+      title.includes('bundesliga') || title.includes('serie a') || title.includes('ligue 1') ||
+      title.includes('europa league') || title.includes('world cup') ||
+      title.includes('over/under') || title.includes('spread') || title.includes('moneyline') ||
+      title.includes('home run') || title.includes('strikeout') || title.includes('rushing') ||
+      title.includes('passing') || title.includes('pga') || title.includes('wwe')) {
     return 'Sports';
   }
   // Crypto
@@ -1010,7 +976,7 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
   }
 
   try {
-    console.log(`[Kalshi] Starting event+market fetch (authenticated)...`);
+    
 
     // ── Paginate through events WITH nested market data ──────────────────
     const unified: UnifiedMarket[] = [];
@@ -1054,25 +1020,29 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
               rules = firstMkt.rules_primary || '';
 
               outcomes = nestedMarkets.map((m: any, idx: number) => {
-                // Price: use best available signal from Kalshi fields
-                // Priority: last_price > yes_bid > yes_ask (all in cents 0-100)
+                // Check if this sub-market has already settled
+                const mResult = (m.result || '').trim().toLowerCase();
+                const mStatus = (m.status || '').trim().toLowerCase();
+                const isSettled = mResult === 'yes' || mResult === 'no' ||
+                  mStatus === 'settled' || mStatus === 'finalized' || mStatus === 'closed';
+
                 let yesPrice: number;
-                if (m.last_price != null && m.last_price > 0) {
+                if (isSettled) {
+                  yesPrice = mResult === 'yes' ? 1.0 : 0.0;
+                } else if (m.last_price != null && m.last_price > 0) {
                   yesPrice = m.last_price / 100;
                 } else if (m.yes_bid != null && m.yes_bid > 0) {
                   yesPrice = m.yes_bid / 100;
                 } else if (m.yes_ask != null && m.yes_ask > 0) {
                   yesPrice = m.yes_ask / 100;
                 } else {
-                  // Truly no data — use a small default
                   yesPrice = 0.01;
                 }
-                yesPrice = Math.max(0.01, Math.min(0.99, yesPrice));
+                yesPrice = Math.max(0, Math.min(1, yesPrice));
 
-                // Outcome name: use subtitle or title (cleaned of Kalshi's raw :: prefix)
                 let outcomeName = (m.subtitle || m.yes_sub_title || m.title || '')
-                  .replace(/^::\s*/g, '')   // strip leading ::
-                  .replace(/^--\s*/g, '')   // strip leading --
+                  .replace(/^::\s*/g, '')
+                  .replace(/^--\s*/g, '')
                   .trim();
                 if (!outcomeName || outcomeName === title) {
                   outcomeName = event.mutually_exclusive ? `Option ${idx + 1}` : 'Yes';
@@ -1083,14 +1053,19 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
                   name: outcomeName,
                   price: yesPrice,
                   tokenId: m.ticker,
+                  settled: isSettled,
+                  settledResult: isSettled ? mResult : undefined,
                 };
               });
 
-              // Use highest-probability outcome as the primary price
-              // (multi-choice markets have many low-prob outcomes; show the leader)
-              const sortedOutcomes = [...outcomes].sort((a, b) => b.price - a.price);
-              primaryPrice = sortedOutcomes[0]?.price ?? 0.5;
-              // Re-order outcomes so the leading one is first
+              // Sort: unsettled first (by price desc), settled last
+              const sortedOutcomes = [...outcomes].sort((a, b) => {
+                if (a.settled && !b.settled) return 1;
+                if (!a.settled && b.settled) return -1;
+                return b.price - a.price;
+              });
+              const firstUnsettled = sortedOutcomes.find(o => !o.settled);
+              primaryPrice = firstUnsettled?.price ?? sortedOutcomes[0]?.price ?? 0.5;
               outcomes = sortedOutcomes;
 
               // Volume: sum across all sub-markets
@@ -1108,8 +1083,9 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
               }
             }
 
-            // Skip events with zero volume (no trading activity)
-            if (totalVolume === 0) continue;
+            // Skip events with zero volume — except crypto (new daily markets may not have volume yet)
+            const mappedCategoryCheck = mapKalshiCategory({ title, category, event_ticker: eventTicker });
+            if (totalVolume === 0 && mappedCategoryCheck !== 'Crypto') continue;
 
             if (totalVolume > 0) withVolume++;
 
@@ -1167,8 +1143,6 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
 
         totalEvents += events.length;
         page++;
-        console.log(`[Kalshi] Events page ${page}: ${events.length} events (total: ${totalEvents}, with volume: ${unified.length})`);
-
         cursor = data.cursor;
         if (!cursor) break;
         await new Promise(r => setTimeout(r, 30));
@@ -1181,10 +1155,7 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
     // Sort by volume descending (highest-traded events first)
     unified.sort((a, b) => b.volume - a.volume);
 
-    // Debug: category distribution
-    const catCounts: Record<string, number> = {};
-    unified.forEach(m => { catCounts[m.category] = (catCounts[m.category] || 0) + 1; });
-    console.log(`[Kalshi] ✅ ${unified.length} events with volume out of ${totalEvents} total. Categories:`, catCounts);
+    console.log(`[Kalshi] ${unified.length} markets fetched`);
 
     return unified;
   } catch (error) {
@@ -1211,23 +1182,17 @@ const ALL_MARKETS_CACHE_TTL = 30_000; // 30 seconds
 export async function fetchAllMarkets(limit: number = 10000): Promise<UnifiedMarket[]> {
   const now = Date.now();
 
-  // 1) Return cached data if fresh
   if (_allMarketsCache && (now - _allMarketsCacheTime) < ALL_MARKETS_CACHE_TTL) {
-    console.log(`[AllMarkets] ✅ Cache hit (${Math.round((now - _allMarketsCacheTime) / 1000)}s old, ${_allMarketsCache.length} markets)`);
     return limit < _allMarketsCache.length ? _allMarketsCache.slice(0, limit) : _allMarketsCache;
   }
 
-  // 2) If another request is already fetching, wait for it (dedup)
   if (_allMarketsFetching) {
-    console.log(`[AllMarkets] ⏳ Waiting for in-flight fetch...`);
     const result = await _allMarketsFetching;
     return limit < result.length ? result.slice(0, limit) : result;
   }
 
-  // 3) Fetch fresh data
   _allMarketsFetching = (async () => {
     try {
-      console.log(`[AllMarkets] 🔄 Fetching fresh data...`);
       const startTime = Date.now();
 
       const [polymarketData, kalshiData] = await Promise.allSettled([
@@ -1248,8 +1213,7 @@ export async function fetchAllMarkets(limit: number = 10000): Promise<UnifiedMar
       const merged = [...polymarkets, ...kalshiMarkets];
       merged.sort((a, b) => b.volume - a.volume);
 
-      const fetchTime = Date.now() - startTime;
-      console.log(`[AllMarkets] ✅ Fetched ${merged.length} markets in ${fetchTime}ms (Poly: ${polymarkets.length}, Kalshi: ${kalshiMarkets.length})`);
+      console.log(`[AllMarkets] ${merged.length} markets (Poly: ${polymarkets.length}, Kalshi: ${kalshiMarkets.length}) in ${Date.now() - startTime}ms`);
 
       // Update cache
       _allMarketsCache = merged;
@@ -1429,7 +1393,7 @@ export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
         if (!cursor) break;
         await new Promise(r => setTimeout(r, 30));
       }
-      console.log(`[FastMarkets] Scanned ${pagesScanned} Kalshi pages for crypto events`);
+      
     }
   } catch (err) {
     console.warn('[FastMarkets] Direct Kalshi fetch error:', err);

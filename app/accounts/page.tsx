@@ -365,8 +365,7 @@ export default function AccountsPage() {
 
   return (
     <div className="min-h-screen bg-[#050505]">
-      <div className="h-16" />
-      <div className="w-full px-6 py-10 flex flex-col gap-6">
+      <div className="w-full px-6 pt-24 pb-10 flex flex-col gap-6">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}

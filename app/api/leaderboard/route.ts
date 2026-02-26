@@ -70,19 +70,6 @@ export async function GET() {
       roi: Number(row.roi || 0),
     }));
 
-    // If no data, return mock leaders
-    if (leaders.length === 0) {
-      return NextResponse.json({
-        leaders: [
-          { userId: 1, tradingAlias: "Trader Alpha", currentEquity: 125000, startBalance: 100000, roi: 25.0 },
-          { userId: 2, tradingAlias: "Trader Beta", currentEquity: 118000, startBalance: 100000, roi: 18.0 },
-          { userId: 3, tradingAlias: "Trader Gamma", currentEquity: 112000, startBalance: 100000, roi: 12.0 },
-          { userId: 4, tradingAlias: "Trader Delta", currentEquity: 105000, startBalance: 100000, roi: 5.0 },
-          { userId: 5, tradingAlias: "Trader Epsilon", currentEquity: 98000, startBalance: 100000, roi: -2.0 },
-        ],
-      });
-    }
-
     return NextResponse.json({ leaders }, {
       headers: {
         'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=30',
@@ -91,21 +78,7 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Failed to load leaderboard:", error);
-    // Return mock data on error
-    return NextResponse.json({
-      leaders: [
-        { userId: 1, tradingAlias: "Trader Alpha", currentEquity: 125000, startBalance: 100000, roi: 25.0 },
-        { userId: 2, tradingAlias: "Trader Beta", currentEquity: 118000, startBalance: 100000, roi: 18.0 },
-        { userId: 3, tradingAlias: "Trader Gamma", currentEquity: 112000, startBalance: 100000, roi: 12.0 },
-        { userId: 4, tradingAlias: "Trader Delta", currentEquity: 105000, startBalance: 100000, roi: 5.0 },
-        { userId: 5, tradingAlias: "Trader Epsilon", currentEquity: 98000, startBalance: 100000, roi: -2.0 },
-      ],
-    }, {
-      headers: {
-        'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=30',
-        'X-Content-Type-Options': 'nosniff',
-      },
-    });
+    return NextResponse.json({ leaders: [] }, { status: 500 });
   }
 }
 

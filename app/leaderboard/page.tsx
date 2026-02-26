@@ -88,8 +88,7 @@ export default function LeaderboardPage() {
 
   return (
     <div className="min-h-screen bg-grid-trading">
-      <div className="h-16" />
-      <main className="pt-48">
+      <main className="pt-24">
         <div className="w-full px-4 sm:px-6 lg:px-8 py-12">
           {/* Header */}
           <div className="mb-12 text-center">

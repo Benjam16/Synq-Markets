@@ -54,7 +54,9 @@ export async function GET(req: NextRequest) {
           COALESCE(cs.profit_split_pct, 0) AS profit_split_pct
         FROM challenge_subscriptions cs
         WHERE cs.user_id = $1
-        ORDER BY cs.started_at DESC
+        ORDER BY 
+          CASE WHEN cs.status = 'active' THEN 0 ELSE 1 END,
+          cs.started_at DESC
         LIMIT 1;
         `,
         [userId],

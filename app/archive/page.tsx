@@ -125,8 +125,7 @@ export default function ArchivePage() {
 
   return (
     <div className="min-h-screen bg-[#050505]">
-      <div className="h-16" />
-      <div className="w-full px-6 py-12">
+      <div className="w-full px-6 pt-24 pb-12">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
