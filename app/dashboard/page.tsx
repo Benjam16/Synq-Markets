@@ -41,7 +41,7 @@ const ArbitrageAlerts = dynamic(() => import('../components/ArbitrageAlerts'), {
 });
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../components/AuthProvider';
-import { CheckCircle2, AlertTriangle, TrendingUp, ArrowRight, Loader2, Search, Filter, Brain, Zap, TrendingUp as TrendingUpIcon, Sparkles, ChevronLeft, ChevronRight, X, Vote, Trophy, Coins, TrendingDown, Globe, Briefcase, ExternalLink } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, TrendingUp, ArrowRight, Loader2, Search, Filter, Brain, Zap, TrendingUp as TrendingUpIcon, Sparkles, ChevronLeft, ChevronRight, X, Vote, Trophy, Coins, TrendingDown, Globe, Briefcase, ExternalLink, Layers, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import Link from 'next/link';
 
 const fallbackTiers: Tier[] = [
@@ -79,6 +79,10 @@ function DashboardContent() {
   const [accountStatus, setAccountStatus] = useState<string | null>(null);
   const [failReason, setFailReason] = useState<string | null>(null);
   const [dbUserId, setDbUserId] = useState<number | null>(null);
+  const [phase, setPhase] = useState<string>('phase1');
+  const [profitSplitPct, setProfitSplitPct] = useState<number>(0);
+  const [parlays, setParlays] = useState<any[]>([]);
+  const [parlaysExpanded, setParlaysExpanded] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const lastDrawdownAlert = useRef<number>(-Infinity);
   const [selectedCategory, setSelectedCategory] = useState<string>('Trending');
@@ -252,7 +256,19 @@ function DashboardContent() {
           if (data.initialBalance) {
             setStartBalance(data.initialBalance);
           }
-          
+
+          // Set phase info
+          if (data.phase) setPhase(data.phase);
+          if (data.profitSplitPct !== undefined) setProfitSplitPct(data.profitSplitPct);
+
+          // Fetch parlays for the user
+          if (dbUserId) {
+            fetch(`/api/parlay?userId=${dbUserId}`)
+              .then(r => r.ok ? r.json() : { parlays: [] })
+              .then(d => setParlays(d.parlays || []))
+              .catch(() => {});
+          }
+
           // Use unrealized P&L from API (which uses live prices) or calculate from positions
           // The API calculates it with live prices, so prefer that
           if (data.unrealizedPnl !== undefined) {
@@ -1946,8 +1962,164 @@ function DashboardContent() {
               </motion.div>
             </div>
 
-            {/* Side Panels - Right (Top Traders + Risk Rules) */}
+            {/* Side Panels - Right (Phase Badge + Multi-Bets + Top Traders + Risk Rules) */}
             <div className="col-span-12 lg:col-span-4 space-y-6">
+
+              {/* Phase Status Card */}
+              {(() => {
+                const PHASE_INFO: Record<string, { label: string; target: string; color: string }> = {
+                  phase1: { label: 'Phase 1 — Challenge', target: '+10% profit', color: '#4FFFC8' },
+                  phase2: { label: 'Phase 2 — Verification', target: '+5% profit', color: '#f59e0b' },
+                  funded: { label: 'Funded Trader', target: '80% profit split', color: '#a78bfa' },
+                };
+                const info = PHASE_INFO[phase] || PHASE_INFO.phase1;
+                const profitTarget = phase === 'phase1' ? 10 : phase === 'phase2' ? 5 : null;
+                const totalReturnPct = startBalance > 0
+                  ? ((currentEquity - startBalance) / startBalance) * 100 : 0;
+                const profitProgress = profitTarget !== null
+                  ? Math.min(100, Math.max(0, (totalReturnPct / profitTarget) * 100)) : 100;
+                return (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="glass-dark rounded-xl p-5"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <div className="text-[9px] font-black tracking-[0.2em] text-slate-500 uppercase mb-0.5">Current Phase</div>
+                        <div className="text-sm font-bold" style={{ color: info.color }}>{info.label}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[9px] font-black tracking-[0.2em] text-slate-500 uppercase mb-0.5">Target</div>
+                        <div className="text-sm font-bold" style={{ color: info.color }}>{info.target}</div>
+                      </div>
+                    </div>
+                    {profitTarget !== null ? (
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] text-slate-500">Progress</span>
+                          <span className="text-[10px] font-bold text-white">
+                            {totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-500"
+                            style={{ width: `${profitProgress}%`, backgroundColor: profitProgress >= 100 ? '#4FFFC8' : info.color }} />
+                        </div>
+                        {profitProgress >= 100 && (
+                          <div className="mt-2 text-[9px] font-black text-[#4FFFC8] tracking-widest">
+                            TARGET REACHED — ADVANCING
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-500">You earn {profitSplitPct}% of all profits generated.</div>
+                    )}
+                  </motion.div>
+                );
+              })()}
+
+              {/* Multi-Bets / Parlays */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="glass-dark rounded-xl p-5"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-violet-400" />
+                    <h2 className="text-base font-semibold text-white tracking-tight">Multi-Bets</h2>
+                  </div>
+                  <span className="text-[9px] font-black text-slate-500 uppercase bg-white/5 px-2 py-1 rounded">
+                    {parlays.length} PLACED
+                  </span>
+                </div>
+
+                {parlays.length === 0 ? (
+                  <div className="text-center py-6">
+                    <Layers className="w-8 h-8 text-slate-700 mx-auto mb-2" />
+                    <p className="text-slate-500 text-sm">No parlays yet</p>
+                    <p className="text-slate-600 text-[11px] mt-1">Use Multi-Bet mode in the Markets tab</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                    {parlays.map((parlay: any) => {
+                      const isExpanded = parlaysExpanded.has(parlay.id);
+                      const statusColors: Record<string, string> = {
+                        pending: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+                        won: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+                        lost: 'text-red-400 bg-red-500/10 border-red-500/20',
+                        cancelled: 'text-slate-400 bg-slate-500/10 border-slate-500/20',
+                      };
+                      const legs: any[] = parlay.legs || [];
+                      return (
+                        <div key={parlay.id} className="rounded-xl border border-white/5 overflow-hidden">
+                          <button
+                            onClick={() => setParlaysExpanded(prev => {
+                              const next = new Set(prev);
+                              if (next.has(parlay.id)) next.delete(parlay.id);
+                              else next.add(parlay.id);
+                              return next;
+                            })}
+                            className="w-full flex items-center justify-between p-3 hover:bg-white/[0.02] transition-colors text-left"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${statusColors[parlay.status] || statusColors.pending}`}>
+                                {(parlay.status || 'PENDING').toUpperCase()}
+                              </span>
+                              <span className="text-[11px] text-slate-300 font-medium">
+                                {legs.length} legs · {Number(parlay.combined_multiplier).toFixed(2)}x
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <div className="text-[10px] text-slate-500">stake</div>
+                                <div className="text-[11px] font-bold text-white">${Number(parlay.stake).toFixed(2)}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-[10px] text-slate-500">payout</div>
+                                <div className={`text-[11px] font-bold ${parlay.status === 'won' ? 'text-emerald-400' : 'text-violet-300'}`}>
+                                  ${Number(parlay.potential_payout).toFixed(2)}
+                                </div>
+                              </div>
+                              {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-500" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-500" />}
+                            </div>
+                          </button>
+                          {isExpanded && (
+                            <div className="border-t border-white/5 px-3 pb-3 pt-2 space-y-1.5">
+                              {legs.map((leg: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-[9px] text-slate-600 flex-shrink-0">#{i + 1}</span>
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase flex-shrink-0 ${
+                                      leg.outcome === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                    }`}>{leg.outcome}</span>
+                                    <span className="text-[10px] text-slate-400 truncate">{leg.marketName}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                                    <span className="text-[10px] text-slate-500">${leg.price?.toFixed(2)}</span>
+                                    {leg.status && leg.status !== 'pending' && (
+                                      <span className={`text-[9px] font-black ${leg.status === 'won' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {leg.status.toUpperCase()}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                              <div className="pt-1 text-[9px] text-slate-600">
+                                Placed {new Date(parlay.placed_at).toLocaleDateString()}
+                                {parlay.settled_at && ` · Settled ${new Date(parlay.settled_at).toLocaleDateString()}`}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </motion.div>
+
               {/* Top Traders */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}

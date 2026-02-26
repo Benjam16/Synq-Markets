@@ -49,7 +49,9 @@ export async function GET(req: NextRequest) {
           cs.day_start_balance,
           cs.start_balance,
           cs.status,
-          cs.fail_reason
+          cs.fail_reason,
+          COALESCE(cs.phase, 'phase1') AS phase,
+          COALESCE(cs.profit_split_pct, 0) AS profit_split_pct
         FROM challenge_subscriptions cs
         WHERE cs.user_id = $1
         ORDER BY cs.started_at DESC
@@ -406,6 +408,9 @@ export async function GET(req: NextRequest) {
       ? Number(subscription.start_balance) 
       : null;
 
+    const phase = (subscription as any)?.phase || 'phase1';
+    const profitSplitPct = Number((subscription as any)?.profit_split_pct || 0);
+
     const data: {
       currentEquity: number;
       cashBalance: number;
@@ -418,6 +423,8 @@ export async function GET(req: NextRequest) {
       failReason?: string | null;
       subscriptionId?: number;
       unrealizedPnl?: number;
+      phase?: string;
+      profitSplitPct?: number;
     } = {
       currentEquity,
       cashBalance,
@@ -434,6 +441,8 @@ export async function GET(req: NextRequest) {
       accountStatus: accountStatus,
       failReason: failReason,
       subscriptionId: subscription?.id || undefined,
+      phase,
+      profitSplitPct,
     };
 
     return NextResponse.json(data, {

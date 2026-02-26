@@ -658,6 +658,128 @@ export default function ChallengesPage() {
           </div>
         </div>
       </main>
+
+      {/* ── How It Works: 3-Stage Progression ──────────────────────── */}
+      <section className="relative z-10 max-w-4xl mx-auto px-6 pb-24 pt-4">
+        <h2 className="text-[10px] font-black tracking-[0.3em] text-slate-500 uppercase text-center mb-10">
+          HOW IT WORKS
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Phase 1 */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="relative bg-slate-950/60 backdrop-blur-xl border border-white/5 rounded-2xl p-6 hover:border-[#4FFFC8]/20 transition-all"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-8 h-8 rounded-full bg-[#4FFFC8]/10 border border-[#4FFFC8]/20 flex items-center justify-center">
+                <span className="text-[10px] font-black text-[#4FFFC8]">01</span>
+              </div>
+              <div>
+                <div className="text-[9px] font-black tracking-[0.25em] text-slate-500 uppercase">Phase 1</div>
+                <div className="text-sm font-bold text-white">Challenge</div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Profit Target</span>
+                <span className="text-[11px] font-black text-[#4FFFC8]">+10%</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Max Drawdown</span>
+                <span className="text-[11px] font-black text-white">-10%</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Daily Loss Limit</span>
+                <span className="text-[11px] font-black text-white">-5%</span>
+              </div>
+            </div>
+            <div className="mt-4 text-[10px] text-slate-600 leading-relaxed">
+              Prove your edge. Hit the profit target while respecting the drawdown rules to advance.
+            </div>
+            <div className="absolute top-4 right-4 text-[9px] text-[#4FFFC8]/40 font-black tracking-widest">EVAL</div>
+          </motion.div>
+
+          {/* Phase 2 */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="relative bg-slate-950/60 backdrop-blur-xl border border-white/5 rounded-2xl p-6 hover:border-amber-400/20 transition-all"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-8 h-8 rounded-full bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
+                <span className="text-[10px] font-black text-amber-400">02</span>
+              </div>
+              <div>
+                <div className="text-[9px] font-black tracking-[0.25em] text-slate-500 uppercase">Phase 2</div>
+                <div className="text-sm font-bold text-white">Verification</div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Profit Target</span>
+                <span className="text-[11px] font-black text-amber-400">+5%</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Max Drawdown</span>
+                <span className="text-[11px] font-black text-white">-10%</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Daily Loss Limit</span>
+                <span className="text-[11px] font-black text-white">-5%</span>
+              </div>
+            </div>
+            <div className="mt-4 text-[10px] text-slate-600 leading-relaxed">
+              A shorter second challenge at the same starting balance. Confirm your consistency.
+            </div>
+            <div className="absolute top-4 right-4 text-[9px] text-amber-400/40 font-black tracking-widest">VERIFY</div>
+          </motion.div>
+
+          {/* Funded */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="relative bg-slate-950/60 backdrop-blur-xl border border-white/5 rounded-2xl p-6 hover:border-purple-400/20 transition-all"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-8 h-8 rounded-full bg-purple-400/10 border border-purple-400/20 flex items-center justify-center">
+                <span className="text-[10px] font-black text-purple-400">03</span>
+              </div>
+              <div>
+                <div className="text-[9px] font-black tracking-[0.25em] text-slate-500 uppercase">Phase 3</div>
+                <div className="text-sm font-bold text-white">Funded Trader</div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Profit Split</span>
+                <span className="text-[11px] font-black text-purple-400">80 / 20</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Max Drawdown</span>
+                <span className="text-[11px] font-black text-white">-10%</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">Daily Loss Limit</span>
+                <span className="text-[11px] font-black text-white">-5%</span>
+              </div>
+            </div>
+            <div className="mt-4 text-[10px] text-slate-600 leading-relaxed">
+              Trade with a funded account. Keep 80% of all profits you generate. No cap.
+            </div>
+            <div className="absolute top-4 right-4 text-[9px] text-purple-400/40 font-black tracking-widest">LIVE</div>
+          </motion.div>
+        </div>
+
+        {/* Arrow connectors between phases */}
+        <div className="hidden md:flex items-center justify-between mt-2 px-[calc(33.33%-20px)] pointer-events-none">
+          <ArrowRight className="w-4 h-4 text-slate-700 -ml-2" />
+          <ArrowRight className="w-4 h-4 text-slate-700 -mr-2" />
+        </div>
+      </section>
     </div>
     </>
   );

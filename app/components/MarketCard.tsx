@@ -2,7 +2,16 @@
 
 import { memo } from "react";
 import { Market } from "@/lib/types";
-import { ExternalLink, ArrowUpRight } from "lucide-react";
+import { ExternalLink, ArrowUpRight, Plus, Check, Layers } from "lucide-react";
+
+export interface ParlayLeg {
+  marketId: string;
+  provider: string;
+  outcome: 'yes' | 'no';
+  price: number;
+  marketName: string;
+  status: 'pending' | 'won' | 'lost';
+}
 
 interface MarketCardProps {
   market: Market;
@@ -10,7 +19,9 @@ interface MarketCardProps {
   onSelect?: (market: Market) => void;
   isSelected?: boolean;
   previousPrice?: number;
-  marketCount?: number; // Number of markets in this event
+  marketCount?: number;
+  parlayMode?: boolean;
+  parlayLegs?: ParlayLeg[];
 }
 
 function MarketCardComponent({
@@ -20,7 +31,11 @@ function MarketCardComponent({
   isSelected = false,
   previousPrice,
   marketCount = 1,
+  parlayMode = false,
+  parlayLegs = [],
 }: MarketCardProps) {
+  const parlayLeg = parlayLegs.find(l => l.marketId === market.id);
+  const inParlay = !!parlayLeg;
   // Get all outcomes from market data
   const getAllOutcomes = () => {
     // If market has explicit outcomes array with more than 2, show count
@@ -88,11 +103,24 @@ function MarketCardComponent({
 
   return (
     <div
-      onClick={() => onSelect?.(market)}
-      className={`group relative bg-slate-950/50 backdrop-blur-md border border-white/5 rounded-md transition-all cursor-pointer overflow-hidden ${
-        isSelected ? "border-[#4FFFC8] ring-1 ring-[#4FFFC8]/20" : "hover:border-white/10 hover:border-[#4FFFC8]/30"
+      onClick={() => { if (!parlayMode) onSelect?.(market); }}
+      className={`group relative bg-slate-950/50 backdrop-blur-md border rounded-md transition-all overflow-hidden ${
+        parlayMode
+          ? inParlay
+            ? 'border-violet-500/50 ring-1 ring-violet-500/20 cursor-default'
+            : 'border-white/5 hover:border-violet-500/20 cursor-default'
+          : isSelected
+          ? 'border-[#4FFFC8] ring-1 ring-[#4FFFC8]/20 cursor-pointer'
+          : 'border-white/5 hover:border-white/10 hover:border-[#4FFFC8]/30 cursor-pointer'
       }`}
     >
+      {/* Parlay indicator badge */}
+      {parlayMode && inParlay && (
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30">
+          <Check className="w-2.5 h-2.5 text-violet-300" />
+          <span className="text-[9px] text-violet-300 font-bold uppercase">{parlayLeg?.outcome}</span>
+        </div>
+      )}
       {/* Compact spacing - Professional look */}
       <div className="flex flex-col p-4">
         {/* Top Row: Image, Name, and Prices */}
@@ -203,9 +231,9 @@ function MarketCardComponent({
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Actions — fixed right side, never wraps */}
+          {/* Actions — fixed right side */}
           <div className="flex items-center gap-1 flex-shrink-0">
-            {market.polymarketUrl && (
+            {market.polymarketUrl && !parlayMode && (
               <a
                 href={market.polymarketUrl}
                 target="_blank"
@@ -217,16 +245,45 @@ function MarketCardComponent({
                 <ExternalLink className="w-3.5 h-3.5 text-slate-400 hover:text-[#4FFFC8]" strokeWidth={1.5} />
               </a>
             )}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelect?.(market);
-              }}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#4FFFC8]/10 hover:bg-[#4FFFC8]/20 border border-[#4FFFC8]/30 hover:border-[#4FFFC8]/50 text-[#4FFFC8] font-medium text-[10px] rounded-full transition-all whitespace-nowrap"
-            >
-              Trade
-              <ArrowUpRight className="w-3 h-3" strokeWidth={1.5} />
-            </button>
+
+            {parlayMode ? (
+              inParlay ? (
+                /* Already in slip — show which side was added */
+                <div className="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-500/20 border border-violet-500/30 text-violet-300 font-bold text-[10px] rounded-full whitespace-nowrap">
+                  <Check className="w-3 h-3" />
+                  Added
+                </div>
+              ) : (
+                /* Parlay YES/NO quick buttons */
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onBuy(market, 'yes'); }}
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 font-bold text-[10px] rounded-full transition-all whitespace-nowrap"
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    YES
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onBuy(market, 'no'); }}
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 font-bold text-[10px] rounded-full transition-all whitespace-nowrap"
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    NO
+                  </button>
+                </div>
+              )
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelect?.(market);
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#4FFFC8]/10 hover:bg-[#4FFFC8]/20 border border-[#4FFFC8]/30 hover:border-[#4FFFC8]/50 text-[#4FFFC8] font-medium text-[10px] rounded-full transition-all whitespace-nowrap"
+              >
+                Trade
+                <ArrowUpRight className="w-3 h-3" strokeWidth={1.5} />
+              </button>
+            )}
           </div>
         </div>
       </div>

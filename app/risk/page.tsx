@@ -8,6 +8,12 @@ import { ProtectedRoute } from "../components/ProtectedRoute";
 import { Shield, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 
+const PHASE_LABELS: Record<string, { label: string; target: string; color: string }> = {
+  phase1: { label: 'Phase 1 — Challenge', target: '+10%', color: '#4FFFC8' },
+  phase2: { label: 'Phase 2 — Verification', target: '+5%', color: '#f59e0b' },
+  funded: { label: 'Funded Trader', target: 'No target', color: '#a78bfa' },
+};
+
 function RiskPageContent() {
   const { user } = useAuth();
   const [dbUserId, setDbUserId] = useState<number | null>(null);
@@ -119,6 +125,16 @@ function RiskPageContent() {
   // Use current equity as fallback if startBalance is not available
   const effectiveStartBalance = startBalance || dashboard.currentEquity || dashboard.dayStartBalance || 5000;
 
+  const phase = (dashboard as any).phase || 'phase1';
+  const phaseInfo = PHASE_LABELS[phase] || PHASE_LABELS.phase1;
+  const profitTarget = phase === 'phase1' ? 10 : phase === 'phase2' ? 5 : null;
+  const totalReturnPct = effectiveStartBalance > 0
+    ? ((dashboard.currentEquity - effectiveStartBalance) / effectiveStartBalance) * 100
+    : 0;
+  const profitProgress = profitTarget !== null
+    ? Math.min(100, Math.max(0, (totalReturnPct / profitTarget) * 100))
+    : 100;
+
   const dailyDrawdownPct = dashboard.dailyDrawdownPct || 0;
   const isAtRisk = dailyDrawdownPct <= -5;
   const totalDrawdownPct = effectiveStartBalance
@@ -196,6 +212,53 @@ function RiskPageContent() {
     <div className="min-h-screen bg-[#050505]">
       <div className="h-16" />
       <div className="w-full px-6 py-10 flex flex-col gap-8">
+
+        {/* Phase Badge + Profit Progress */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-slate-950/40 backdrop-blur-xl border border-white/5 rounded-2xl p-6 hover:border-white/10 transition-colors"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="text-[9px] font-black tracking-[0.25em] text-slate-500 uppercase mb-1">Current Phase</div>
+              <div className="text-base font-bold" style={{ color: phaseInfo.color }}>{phaseInfo.label}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[9px] font-black tracking-[0.25em] text-slate-500 uppercase mb-1">Profit Target</div>
+              <div className="text-base font-bold" style={{ color: phaseInfo.color }}>{phaseInfo.target}</div>
+            </div>
+          </div>
+          {profitTarget !== null ? (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] text-slate-500">Progress to target</span>
+                <span className="text-[10px] font-bold text-white">
+                  {totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}% / {phaseInfo.target}
+                </span>
+              </div>
+              <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${profitProgress}%`,
+                    backgroundColor: profitProgress >= 100 ? '#4FFFC8' : phaseInfo.color,
+                  }}
+                />
+              </div>
+              {profitProgress >= 100 && (
+                <div className="mt-2 text-[10px] font-black text-[#4FFFC8] tracking-widest">
+                  TARGET REACHED — PHASE ADVANCE PENDING
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-[10px] text-slate-500">
+              You are funded. Keep 80% of all profits. Drawdown rules still apply.
+            </div>
+          )}
+        </motion.div>
+
         {/* Vital Signs - Circular Gauges */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <motion.div
@@ -307,6 +370,21 @@ function RiskPageContent() {
               </div>
               <div className="ml-4">
                 <Shield className="w-5 h-5 text-[#4FFFC8]" strokeWidth={1.5} />
+              </div>
+            </div>
+
+            {/* Profit Target */}
+            <div className="flex items-center justify-between py-4 border-b border-white/5">
+              <div className="flex-1">
+                <div className="text-[10px] font-black text-white tracking-[0.2em] uppercase mb-1">PROFIT TARGET</div>
+                <div className="text-xs text-slate-500">
+                  {phase === 'funded'
+                    ? 'Funded — no target, 80% profit split'
+                    : `${phaseInfo.label}: reach ${phaseInfo.target} to advance`}
+                </div>
+              </div>
+              <div className="ml-4">
+                <Shield className="w-5 h-5" style={{ color: phaseInfo.color }} strokeWidth={1.5} />
               </div>
             </div>
 

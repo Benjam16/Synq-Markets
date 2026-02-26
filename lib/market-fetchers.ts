@@ -1295,6 +1295,9 @@ export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
   const markets: UnifiedMarket[] = [];
   const seenIds = new Set<string>();
 
+  const now = Date.now();
+  const in24h = now + 24 * 60 * 60 * 1000;
+
   // ── Strategy 1: filter from main cache ────────────────────────────────
   try {
     const allMarkets = await fetchAllMarkets(5000);
@@ -1306,6 +1309,13 @@ export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
         (m.category || '').toLowerCase() === 'crypto' ||
         CRYPTO_KEYWORDS.some(kw => name.includes(kw));
       if (!isCrypto) continue;
+      // Only same-day / within-24h markets
+      if (m.resolutionDate) {
+        try {
+          const resMs = new Date(m.resolutionDate).getTime();
+          if (resMs > in24h) continue; // skip long-dated markets
+        } catch { /* keep market if date unparseable */ }
+      }
       if (seenIds.has(m.id)) continue;
       seenIds.add(m.id);
       markets.push({ ...m, category: 'Fast Markets' });
@@ -1384,6 +1394,14 @@ export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
           const primaryPrice = outcomes.length > 0 ? outcomes[0].price : 0.5;
           const totalVol = nested.reduce((s: number, m: any) => s + (m.volume || 0), 0);
           const resolutionDate = first.close_time || first.expected_expiration_time || first.expiration_time || '';
+
+          // Only include markets resolving within the next 24 hours
+          if (resolutionDate) {
+            try {
+              const resMs = new Date(resolutionDate).getTime();
+              if (resMs > in24h) continue;
+            } catch { /* keep if unparseable */ }
+          }
 
           markets.push({
             id: eventId,

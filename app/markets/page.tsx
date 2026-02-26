@@ -3,8 +3,8 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useDebounce } from "@/lib/use-debounce";
 import { Market } from "@/lib/types";
-import { Filter, TrendingUp, Zap, Sparkles, ChevronLeft, ChevronRight, Vote, Trophy, Coins, TrendingDown, Globe, Briefcase, Timer } from "lucide-react";
-import { motion } from "framer-motion";
+import { Filter, TrendingUp, Zap, Sparkles, ChevronLeft, ChevronRight, Vote, Trophy, Coins, TrendingDown, Globe, Briefcase, Timer, Layers, X, Plus, Minus, ChevronDown, ChevronUp } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 // Dynamic imports for code splitting
 import dynamic from 'next/dynamic';
 
@@ -13,7 +13,16 @@ const MarketCard = dynamic(() => import("../components/MarketCard"), { ssr: fals
 const VirtualizedMarketList = dynamic(() => import("../components/VirtualizedMarketList"), { ssr: false });
 import { useAuth } from "../components/AuthProvider";
 import { useRouter } from "next/navigation";
-import { Toaster } from "react-hot-toast";
+import { Toaster, toast } from "react-hot-toast";
+
+export interface ParlayLeg {
+  marketId: string;
+  provider: string;
+  outcome: 'yes' | 'no';
+  price: number;
+  marketName: string;
+  status: 'pending' | 'won' | 'lost';
+}
 
 export default function MarketsPage() {
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -29,6 +38,23 @@ export default function MarketsPage() {
   const [sourceFilter, setSourceFilter] = useState<'All' | 'Polymarket' | 'Kalshi'>('All');
   const { user } = useAuth();
   const router = useRouter();
+
+  // ── Parlay / Multi-Bet state ───────────────────────────────────────
+  const [parlayMode, setParlayMode] = useState(false);
+  const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
+  const [parlayStake, setParlayStake] = useState<string>('10');
+  const [parlaySlipOpen, setParlaySlipOpen] = useState(false);
+  const [parlayPlacing, setParlayPlacing] = useState(false);
+  const [dbUserId, setDbUserId] = useState<number | null>(null);
+
+  // Resolve dbUserId for parlay placement
+  useEffect(() => {
+    if (!user?.email) return;
+    fetch(`/api/user?email=${encodeURIComponent(user.email)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.user?.id) setDbUserId(d.user.id); })
+      .catch(() => {});
+  }, [user]);
 
   // Measure top nav height to position markets header exactly
   useEffect(() => {
@@ -200,13 +226,22 @@ export default function MarketsPage() {
   // ── Build Fast tab from BOTH fast API + client-side filter of main markets
   const combinedFastMarkets = useMemo(() => {
     const CRYPTO_KW = ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'xrp', 'doge', 'avax', 'link', 'bnb', 'hyperliquid'];
-    // Client-side filter: find "Up or Down" crypto markets already in the main markets list
+    const in24h = Date.now() + 24 * 60 * 60 * 1000;
+    // Client-side filter: "Up or Down" crypto markets resolving within 24 hours
     const fromMain = markets.filter(m => {
       const name = (m.name || m.eventTitle || '').toLowerCase();
       const isUpDown = name.includes('up or down') || name.includes('up/down');
       if (!isUpDown) return false;
       const cat = (m.category || '').toLowerCase();
-      return cat === 'crypto' || CRYPTO_KW.some(kw => name.includes(kw));
+      if (!(cat === 'crypto' || CRYPTO_KW.some(kw => name.includes(kw)))) return false;
+      // Only same-day / within-24h
+      if (m.resolutionDate) {
+        try {
+          const resMs = new Date(m.resolutionDate).getTime();
+          if (resMs > in24h) return false;
+        } catch { /* keep */ }
+      }
+      return true;
     });
     // Merge with fast API results, deduplicate by id
     const seen = new Set<string>();
@@ -743,7 +778,84 @@ export default function MarketsPage() {
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   }, [now]);
 
+  // ── Parlay helpers ────────────────────────────────────────────────────
+  const parlayMultiplier = useMemo(() => {
+    if (parlayLegs.length === 0) return 1;
+    return parlayLegs.reduce((acc, l) => acc * (1 / l.price), 1);
+  }, [parlayLegs]);
+
+  const parlayPayout = useMemo(() => {
+    const stakeNum = parseFloat(parlayStake) || 0;
+    return +(stakeNum * parlayMultiplier).toFixed(2);
+  }, [parlayStake, parlayMultiplier]);
+
+  const addParlayLeg = useCallback((market: Market, outcome: 'yes' | 'no') => {
+    if (parlayLegs.length >= 6) {
+      toast.error('Maximum 6 legs per parlay');
+      return;
+    }
+    // Prevent duplicate market
+    if (parlayLegs.some(l => l.marketId === market.id)) {
+      // Toggle off if same market+outcome clicked again
+      setParlayLegs(prev => prev.filter(l => l.marketId !== market.id));
+      return;
+    }
+    const price = outcome === 'yes' ? market.price : 1 - market.price;
+    const safeprice = Math.max(0.01, Math.min(0.99, price));
+    setParlayLegs(prev => [
+      ...prev,
+      {
+        marketId: market.id,
+        provider: market.provider || 'polymarket',
+        outcome,
+        price: safeprice,
+        marketName: market.eventTitle || market.name,
+        status: 'pending',
+      },
+    ]);
+    setParlaySlipOpen(true);
+  }, [parlayLegs]);
+
+  const removeParlayLeg = useCallback((marketId: string) => {
+    setParlayLegs(prev => prev.filter(l => l.marketId !== marketId));
+  }, []);
+
+  const clearParlay = useCallback(() => {
+    setParlayLegs([]);
+    setParlayStake('10');
+    setParlaySlipOpen(false);
+  }, []);
+
+  const placeParlay = useCallback(async () => {
+    if (parlayLegs.length < 2) { toast.error('Add at least 2 legs'); return; }
+    if (!dbUserId) { toast.error('Please sign in to place a parlay'); return; }
+    const stakeNum = parseFloat(parlayStake);
+    if (!stakeNum || stakeNum <= 0) { toast.error('Enter a valid stake'); return; }
+    setParlayPlacing(true);
+    try {
+      const res = await fetch('/api/parlay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: dbUserId, legs: parlayLegs, stake: stakeNum }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to place parlay');
+      toast.success(`Parlay placed! Potential payout: $${data.potentialPayout.toFixed(2)}`);
+      clearParlay();
+      setParlayMode(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to place parlay');
+    } finally {
+      setParlayPlacing(false);
+    }
+  }, [parlayLegs, parlayStake, dbUserId, clearParlay]);
+
   const handleBuy = useCallback((market: Market, side: "yes" | "no") => {
+    // In parlay mode, add to slip instead of opening TradePanel
+    if (parlayMode) {
+      addParlayLeg(market, side);
+      return;
+    }
     // Find the event this market belongs to
     const eventKey = market.slug || market.eventTitle || market.id;
     const eventMarkets = groupedMarkets.find(g => g.key === eventKey)?.markets || [market];
@@ -825,33 +937,62 @@ export default function MarketsPage() {
               </div>
             </div>
 
-            {/* Source Toggle — All / Polymarket / Kalshi */}
-            <div className="flex items-center gap-1 bg-white/[0.03] rounded-full p-1 mb-1">
-              {(['All', 'Polymarket', 'Kalshi'] as const).map((src) => {
-                const isActive = sourceFilter === src;
-                return (
-                  <button
-                    key={src}
-                    onClick={() => setSourceFilter(src)}
-                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all ${
-                      isActive
-                        ? src === 'Kalshi'
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : src === 'Polymarket'
-                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                            : 'bg-white/10 text-white border border-white/10'
-                        : 'text-slate-500 hover:text-white border border-transparent'
-                    }`}
-                  >
-                    {src !== 'All' && (
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        src === 'Kalshi' ? 'bg-emerald-400' : 'bg-blue-400'
-                      }`} />
-                    )}
-                    {src}
-                  </button>
-                );
-              })}
+            {/* Source Toggle + Multi-Bet Button row */}
+            <div className="flex items-center justify-between w-full max-w-[600px] mx-auto px-4 md:px-0 mb-1">
+              {/* Source Toggle — All / Polymarket / Kalshi */}
+              <div className="flex items-center gap-1 bg-white/[0.03] rounded-full p-1">
+                {(['All', 'Polymarket', 'Kalshi'] as const).map((src) => {
+                  const isActive = sourceFilter === src;
+                  return (
+                    <button
+                      key={src}
+                      onClick={() => setSourceFilter(src)}
+                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all ${
+                        isActive
+                          ? src === 'Kalshi'
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : src === 'Polymarket'
+                              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                              : 'bg-white/10 text-white border border-white/10'
+                          : 'text-slate-500 hover:text-white border border-transparent'
+                      }`}
+                    >
+                      {src !== 'All' && (
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          src === 'Kalshi' ? 'bg-emerald-400' : 'bg-blue-400'
+                        }`} />
+                      )}
+                      {src}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Multi-Bet Toggle */}
+              <button
+                onClick={() => {
+                  if (parlayMode) {
+                    clearParlay();
+                    setParlayMode(false);
+                  } else {
+                    setParlayMode(true);
+                    setParlaySlipOpen(true);
+                  }
+                }}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all border ${
+                  parlayMode
+                    ? 'bg-violet-500/20 text-violet-300 border-violet-500/40'
+                    : 'text-slate-400 border-white/10 hover:text-white hover:border-white/20 bg-white/[0.03]'
+                }`}
+              >
+                <Layers className="w-3 h-3" />
+                Multi-Bet
+                {parlayLegs.length > 0 && (
+                  <span className="ml-0.5 w-4 h-4 rounded-full bg-violet-500 text-white text-[9px] flex items-center justify-center font-black">
+                    {parlayLegs.length}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -964,6 +1105,7 @@ export default function MarketsPage() {
                   market={eventGroup.mainMarket}
                   onBuy={handleBuy}
                   onSelect={() => {
+                    if (parlayMode) return; // disable expansion in parlay mode
                     setSelectedEvent({
                       key: eventGroup.key,
                       eventTitle: eventGroup.eventTitle,
@@ -973,6 +1115,8 @@ export default function MarketsPage() {
                   }}
                   isSelected={selectedEvent?.key === eventGroup.key}
                   marketCount={eventGroup.markets.length}
+                  parlayMode={parlayMode}
+                  parlayLegs={parlayLegs}
                 />
                 {/* Countdown badge pinned to bottom bar for fast markets */}
                 {selectedCategory === 'Fast' && eventGroup.mainMarket.resolutionDate && (
@@ -989,8 +1133,209 @@ export default function MarketsPage() {
         )}
       </main>
 
+      {/* Parlay mode banner */}
+      <AnimatePresence>
+        {parlayMode && (
+          <motion.div
+            initial={{ y: 60, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 60, opacity: 0 }}
+            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-full bg-violet-950/90 border border-violet-500/30 backdrop-blur-xl shadow-2xl"
+          >
+            <Layers className="w-3.5 h-3.5 text-violet-400" />
+            <span className="text-[11px] font-bold text-violet-200">
+              Multi-Bet active — click YES / NO on any market to add a leg
+            </span>
+            <span className="text-violet-400 font-black text-[11px]">{parlayLegs.length}/6</span>
+            {parlayLegs.length > 0 && (
+              <button
+                onClick={() => setParlaySlipOpen(true)}
+                className="px-3 py-1 rounded-full bg-violet-500/30 text-violet-200 text-[10px] font-bold hover:bg-violet-500/50 transition-all"
+              >
+                View Slip
+              </button>
+            )}
+            <button onClick={() => { clearParlay(); setParlayMode(false); }} className="text-violet-500 hover:text-violet-200 transition-colors">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Parlay Slip Panel */}
+      <AnimatePresence>
+        {parlaySlipOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setParlaySlipOpen(false)}
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+            />
+            {/* Slip */}
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+              className="fixed right-0 top-0 h-full w-full max-w-sm z-50 bg-[#09090F] border-l border-white/5 shadow-2xl flex flex-col"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-violet-400" />
+                  <span className="text-sm font-bold text-white">Multi-Bet Slip</span>
+                  {!parlayMode && (
+                    <button
+                      onClick={() => setParlayMode(true)}
+                      className="ml-2 px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-[9px] font-bold"
+                    >
+                      ACTIVATE
+                    </button>
+                  )}
+                </div>
+                <button onClick={() => setParlaySlipOpen(false)} className="text-slate-500 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Legs list */}
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+                {parlayLegs.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-32 text-center">
+                    <Layers className="w-8 h-8 text-slate-700 mb-3" />
+                    <p className="text-slate-500 text-sm">No legs added yet</p>
+                    <p className="text-slate-600 text-[11px] mt-1">
+                      {parlayMode ? 'Click YES or NO on any market card' : 'Activate Multi-Bet to start building'}
+                    </p>
+                  </div>
+                ) : (
+                  parlayLegs.map((leg, i) => (
+                    <motion.div
+                      key={leg.marketId}
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5"
+                    >
+                      <div className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/20 flex items-center justify-center">
+                        <span className="text-[9px] font-black text-violet-300">{i + 1}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] text-white font-medium truncate">{leg.marketName}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${
+                            leg.outcome === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                          }`}>{leg.outcome}</span>
+                          <span className="text-[10px] text-slate-400">${leg.price.toFixed(2)}</span>
+                          <span className="text-[10px] text-slate-500">{(1 / leg.price).toFixed(2)}x</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => removeParlayLeg(leg.marketId)}
+                        className="text-slate-600 hover:text-red-400 transition-colors flex-shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </motion.div>
+                  ))
+                )}
+
+                {parlayLegs.length > 0 && parlayLegs.length < 6 && parlayMode && (
+                  <div className="text-center py-2">
+                    <span className="text-[10px] text-slate-600">
+                      Add up to {6 - parlayLegs.length} more leg{6 - parlayLegs.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Summary + Controls */}
+              {parlayLegs.length >= 2 && (
+                <div className="border-t border-white/5 px-4 py-4 space-y-3 bg-white/[0.02]">
+                  {/* Combined odds */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-500">Combined Odds</span>
+                    <span className="text-sm font-black text-violet-300">{parlayMultiplier.toFixed(2)}x</span>
+                  </div>
+
+                  {/* Stake input */}
+                  <div>
+                    <label className="text-[10px] text-slate-500 mb-1.5 block">Stake ($)</label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setParlayStake(s => String(Math.max(1, (parseFloat(s) || 0) - 5)))}
+                        className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all"
+                      >
+                        <Minus className="w-3 h-3 text-slate-400" />
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={parlayStake}
+                        onChange={e => setParlayStake(e.target.value)}
+                        className="flex-1 h-8 px-3 bg-white/[0.04] rounded-lg text-white text-sm font-mono text-center focus:outline-none focus:ring-1 focus:ring-violet-500/30 border border-white/5"
+                      />
+                      <button
+                        onClick={() => setParlayStake(s => String((parseFloat(s) || 0) + 5))}
+                        className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all"
+                      >
+                        <Plus className="w-3 h-3 text-slate-400" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Potential payout */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-violet-500/5 border border-violet-500/10">
+                    <span className="text-[10px] text-slate-500">Potential Payout</span>
+                    <span className="text-base font-black text-violet-300">${parlayPayout.toFixed(2)}</span>
+                  </div>
+
+                  {/* Place button */}
+                  <button
+                    onClick={placeParlay}
+                    disabled={parlayPlacing || parlayLegs.length < 2}
+                    className="w-full py-3.5 rounded-xl bg-violet-500 hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                  >
+                    {parlayPlacing ? (
+                      <>
+                        <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                        Placing...
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-3.5 h-3.5" />
+                        Place Parlay ({parlayLegs.length} legs)
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => { clearParlay(); setParlayMode(false); }}
+                    className="w-full py-2 text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
+                  >
+                    Clear slip & exit multi-bet
+                  </button>
+                </div>
+              )}
+
+              {parlayLegs.length === 1 && (
+                <div className="border-t border-white/5 px-4 py-4">
+                  <p className="text-[11px] text-slate-500 text-center">
+                    Add at least 1 more leg to place a parlay
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Trade Panel - Shows all markets for the event */}
-      {selectedEvent && (
+      {!parlayMode && selectedEvent && (
         <TradePanel
           eventMarkets={selectedEvent.markets}
           eventTitle={selectedEvent.eventTitle}
