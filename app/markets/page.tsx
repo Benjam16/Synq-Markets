@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useDebounce } from "@/lib/use-debounce";
 import { Market } from "@/lib/types";
-import { Filter, TrendingUp, Zap, Sparkles, Bookmark, ChevronLeft, ChevronRight, Vote, Trophy, Coins, TrendingDown, Globe, Briefcase } from "lucide-react";
+import { Filter, TrendingUp, Zap, Sparkles, ChevronLeft, ChevronRight, Vote, Trophy, Coins, TrendingDown, Globe, Briefcase, Timer } from "lucide-react";
 import { motion } from "framer-motion";
 // Dynamic imports for code splitting
 import dynamic from 'next/dynamic';
@@ -17,6 +17,9 @@ import { Toaster } from "react-hot-toast";
 
 export default function MarketsPage() {
   const [markets, setMarkets] = useState<Market[]>([]);
+  const [fastMarkets, setFastMarkets] = useState<Market[]>([]);
+  const [fastMarketsLoading, setFastMarketsLoading] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const [selectedCategory, setSelectedCategory] = useState('Trending');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEvent, setSelectedEvent] = useState<{ key: string; eventTitle: string; markets: Market[] } | null>(null);
@@ -164,11 +167,60 @@ export default function MarketsPage() {
     };
   }, []);
 
+  // ── Fast markets polling (15s refresh when Fast tab is active) ──────────
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setFastMarketsLoading(true);
+      try {
+        const res = await fetch(`/api/markets/fast?_t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok && mounted) {
+          const data = await res.json();
+          setFastMarkets(data.markets || []);
+        }
+      } catch { /* silent */ } finally {
+        if (mounted) setFastMarketsLoading(false);
+      }
+    };
+    load();
+    const id = setInterval(load, 15_000); // refresh every 15s
+    return () => { mounted = false; clearInterval(id); };
+  }, []);
+
+  // ── Live clock for countdown timers (every second when Fast tab open) ──
+  useEffect(() => {
+    if (selectedCategory !== 'Fast') return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [selectedCategory]);
+
   // Debounced search for better performance
   const debouncedSearch = useDebounce(searchQuery, 300);
 
   // Group markets by event (slug) - Polymarket style: one card per event
   const groupedMarkets = useMemo(() => {
+    // Fast tab: use fastMarkets directly (skip the regular markets pipeline)
+    if (selectedCategory === 'Fast') {
+      const source = fastMarkets.filter(m => {
+        if (sourceFilter !== 'All' && m.provider !== sourceFilter) return false;
+        if (!debouncedSearch) return true;
+        return (m.eventTitle || m.name).toLowerCase().includes(debouncedSearch.toLowerCase());
+      });
+      const grouped = new Map<string, Market[]>();
+      source.forEach(m => {
+        const key = m.slug || m.id;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(m);
+      });
+      return Array.from(grouped.entries()).map(([key, mkts]) => ({
+        key,
+        eventTitle: mkts[0].eventTitle || mkts[0].name,
+        markets: mkts,
+        mainMarket: mkts[0],
+        totalVolume: mkts.reduce((s, m) => s + (m.volume || 0), 0),
+      }));
+    }
+
     // Debug: Log total markets and category distribution
     if (markets.length > 0) {
       const categoryCounts: Record<string, number> = {};
@@ -402,12 +454,9 @@ export default function MarketsPage() {
         if (matchesCat && (isShortTermCrypto || isSameDaySports)) {
           console.log(`[Breaking] Found ${isShortTermCrypto ? 'short-term crypto' : ''} ${isSameDaySports ? 'same-day sports' : ''} market: "${m.name?.substring(0, 60)}"`);
         }
-      } else if (selectedCategory === 'New') {
-        const marketDate = m.last_updated ? new Date(m.last_updated) : new Date();
-        const daysSince = (Date.now() - marketDate.getTime()) / (1000 * 60 * 60 * 24);
-        const isRecent = daysSince < 3;
-        const isNewlyListed = (m.volume || 0) < 10000;
-        matchesCat = isRecent || isNewlyListed;
+      } else if (selectedCategory === 'Fast') {
+        // Fast tab uses fastMarkets state — this branch never matches from `markets`
+        matchesCat = false;
       } else {
         // Enhanced category matching - handle all variations and edge cases
         const marketCat = (m.category || '').toLowerCase().trim();
@@ -657,7 +706,18 @@ export default function MarketsPage() {
         // Then sort by volume
         return b.totalVolume - a.totalVolume;
       });
-  }, [markets, debouncedSearch, selectedCategory, sourceFilter]);
+  }, [markets, fastMarkets, debouncedSearch, selectedCategory, sourceFilter]);
+
+  // ── Countdown helper for Fast Markets ──────────────────────────────────
+  const getCountdown = useCallback((resolutionDate: string | undefined): string => {
+    if (!resolutionDate) return '';
+    const ms = new Date(resolutionDate).getTime() - now;
+    if (ms <= 0) return 'Resolving…';
+    const totalSecs = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  }, [now]);
 
   const handleBuy = useCallback((market: Market, side: "yes" | "no") => {
     // Find the event this market belongs to
@@ -675,7 +735,7 @@ export default function MarketsPage() {
   const mainCategories = [
     { id: 'Trending', label: 'Trending', icon: TrendingUp },
     { id: 'Breaking', label: 'Breaking', icon: Zap },
-    { id: 'New', label: 'New', icon: Sparkles },
+    { id: 'Fast', label: '⚡ Fast', icon: Timer },
     { id: 'Politics', label: 'Politics', icon: Vote },
     { id: 'Sports', label: 'Sports', icon: Trophy },
     { id: 'Crypto', label: 'Crypto', icon: Coins },
@@ -814,54 +874,92 @@ export default function MarketsPage() {
 
       {/* Main Content - Full Width with Better Spacing */}
       <main className="w-full max-w-[1600px] mx-auto px-6 pt-6 pb-4">
-        {loading ? (
+
+        {/* ── Fast Markets info banner ── */}
+        {selectedCategory === 'Fast' && (
+          <div className="flex items-center gap-3 mb-5 px-4 py-3 rounded-xl bg-amber-500/5 border border-amber-500/20">
+            <Timer className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="text-amber-400 text-xs font-bold uppercase tracking-widest">Fast-Settling Crypto Markets</span>
+              <p className="text-slate-400 text-[11px] mt-0.5">
+                Crypto markets resolving within the next hour from Polymarket &amp; Kalshi. Prices and timers update every 15 seconds.
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-amber-400 text-[10px] font-bold">{fastMarkets.length} markets</span>
+            </div>
+          </div>
+        )}
+
+        {(loading && selectedCategory !== 'Fast') || (fastMarketsLoading && selectedCategory === 'Fast' && fastMarkets.length === 0) ? (
           <div className="flex items-center justify-center py-32">
             <div className="flex flex-col items-center gap-4">
-              <div className="w-12 h-12 border-4 border-[#4FFFC8] border-t-transparent rounded-full animate-spin" />
-              <span className="text-slate-400 text-sm">Loading markets...</span>
+              <div className={`w-12 h-12 border-4 border-t-transparent rounded-full animate-spin ${selectedCategory === 'Fast' ? 'border-amber-400' : 'border-[#4FFFC8]'}`} />
+              <span className="text-slate-400 text-sm">
+                {selectedCategory === 'Fast' ? 'Fetching fast crypto markets…' : 'Loading markets...'}
+              </span>
             </div>
           </div>
         ) : groupedMarkets.length === 0 ? (
           <div className="text-center py-32">
-            <Filter className="w-12 h-12 text-slate-700 mx-auto mb-4" />
-            <p className="text-lg text-slate-400 mb-2">
-              {markets.length === 0 
-                ? 'Loading markets...' 
-                : 'No markets found'}
-            </p>
-            <p className="text-sm text-slate-500">
-              {markets.length === 0 
-                ? 'Please wait while we fetch markets from Polymarket' 
-                : 'Try adjusting your search or filters'}
-            </p>
-            {markets.length > 0 && (
-              <p className="text-xs text-slate-600 mt-2">
-                Found {markets.length} total markets, but none match "{selectedCategory}"
-              </p>
+            {selectedCategory === 'Fast' ? (
+              <>
+                <Timer className="w-12 h-12 text-amber-700 mx-auto mb-4" />
+                <p className="text-lg text-slate-400 mb-2">No fast-settling markets right now</p>
+                <p className="text-sm text-slate-500">Check back soon — new markets open every few minutes</p>
+              </>
+            ) : (
+              <>
+                <Filter className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+                <p className="text-lg text-slate-400 mb-2">
+                  {markets.length === 0 ? 'Loading markets...' : 'No markets found'}
+                </p>
+                <p className="text-sm text-slate-500">
+                  {markets.length === 0
+                    ? 'Please wait while we fetch markets from Polymarket'
+                    : 'Try adjusting your search or filters'}
+                </p>
+                {markets.length > 0 && (
+                  <p className="text-xs text-slate-600 mt-2">
+                    Found {markets.length} total markets, but none match "{selectedCategory}"
+                  </p>
+                )}
+              </>
             )}
           </div>
         ) : (
           <VirtualizedMarketList
             items={groupedMarkets}
-            initialCount={50} // Render first 50 markets
-            loadMoreCount={50} // Load 50 more when scrolling near bottom
+            initialCount={50}
+            loadMoreCount={50}
             className="mt-4"
             renderItem={(eventGroup, index) => (
-              <MarketCard
-                key={eventGroup.key}
-                market={eventGroup.mainMarket}
-                onBuy={handleBuy}
-                onSelect={() => {
-                  setSelectedEvent({
-                    key: eventGroup.key,
-                    eventTitle: eventGroup.eventTitle,
-                    markets: eventGroup.markets,
-                  });
-                  setIsTradePanelOpen(true);
-                }}
-                isSelected={selectedEvent?.key === eventGroup.key}
-                marketCount={eventGroup.markets.length}
-              />
+              <div key={eventGroup.key} className="relative">
+                {/* Countdown badge for fast markets */}
+                {selectedCategory === 'Fast' && eventGroup.mainMarket.resolutionDate && (
+                  <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 backdrop-blur-sm">
+                    <Timer className="w-2.5 h-2.5 text-amber-400" />
+                    <span className="text-amber-400 text-[10px] font-mono font-bold">
+                      {getCountdown(eventGroup.mainMarket.resolutionDate)}
+                    </span>
+                  </div>
+                )}
+                <MarketCard
+                  market={eventGroup.mainMarket}
+                  onBuy={handleBuy}
+                  onSelect={() => {
+                    setSelectedEvent({
+                      key: eventGroup.key,
+                      eventTitle: eventGroup.eventTitle,
+                      markets: eventGroup.markets,
+                    });
+                    setIsTradePanelOpen(true);
+                  }}
+                  isSelected={selectedEvent?.key === eventGroup.key}
+                  marketCount={eventGroup.markets.length}
+                />
+              </div>
             )}
           />
         )}

@@ -1266,3 +1266,163 @@ export async function fetchAllMarkets(limit: number = 10000): Promise<UnifiedMar
   const result = await _allMarketsFetching;
   return limit < result.length ? result.slice(0, limit) : result;
 }
+
+// ============================================================================
+// FAST CRYPTO MARKETS FETCHER
+// Fetches crypto markets resolving within the next ~60 minutes from both
+// Polymarket and Kalshi. Tagged as category: 'Fast Markets'.
+// ============================================================================
+
+export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
+  const nowMs = Date.now();
+  const cutoffMs = nowMs + 60 * 60 * 1000; // 1-hour window
+  const markets: UnifiedMarket[] = [];
+
+  // ── 1. Polymarket fast markets ──────────────────────────────────────────
+  try {
+    const res = await fetch(
+      'https://gamma-api.polymarket.com/markets?active=true&closed=false&order=endDate&ascending=true&limit=200',
+      { cache: 'no-store' },
+    );
+    if (res.ok) {
+      const raw = await res.json();
+      const list: any[] = Array.isArray(raw) ? raw : (raw.data || raw.markets || []);
+      for (const m of list) {
+        const endMs = new Date(m.endDate || m.end_date || 0).getTime();
+        if (endMs <= nowMs || endMs > cutoffMs) continue;
+
+        const question = (m.question || m.title || '').toLowerCase();
+        const tags = ((m.tags || []) as any[])
+          .map((t: any) => (t.slug || t.label || String(t)).toLowerCase())
+          .join(' ');
+        const isCrypto =
+          question.includes('btc') || question.includes('bitcoin') ||
+          question.includes('eth') || question.includes('ethereum') ||
+          question.includes('sol') || question.includes('solana') ||
+          question.includes('crypto') || question.includes('coin') ||
+          question.includes('doge') || question.includes('xrp') ||
+          tags.includes('crypto') || tags.includes('bitcoin');
+        if (!isCrypto) continue;
+
+        const price = Math.max(0.01, Math.min(0.99, parseFloat(m.lastTradePrice || m.bestBid || '0.5') || 0.5));
+        const minsLeft = Math.round((endMs - nowMs) / 60_000);
+
+        markets.push({
+          id: m.conditionId || String(m.id || ''),
+          conditionId: m.conditionId || String(m.id || ''),
+          provider: 'Polymarket',
+          name: m.question || m.title || 'Unknown',
+          eventTitle: m.question || m.title || 'Unknown',
+          description: `Resolves in ~${minsLeft} min`,
+          price,
+          outcomes: [
+            { id: `${m.conditionId}-yes`, name: 'Yes', price },
+            { id: `${m.conditionId}-no`, name: 'No', price: 1 - price },
+          ],
+          imageUrl: m.image || m.icon || '',
+          polymarketUrl: m.slug ? `https://polymarket.com/event/${m.slug}` : 'https://polymarket.com',
+          kalshiUrl: '',
+          slug: m.slug || String(m.conditionId || m.id || ''),
+          volume: parseInt(String(m.volume || '0'), 10),
+          volumeFormatted: formatVolume(parseInt(String(m.volume || '0'), 10)),
+          category: 'Fast Markets',
+          last_updated: new Date().toISOString(),
+          resolutionDate: m.endDate || m.end_date || '',
+          change: parseFloat(String(m.oneDayPriceChange || '0')) || 0,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[FastMarkets] Polymarket error:', err);
+  }
+
+  // ── 2. Kalshi fast crypto markets ───────────────────────────────────────
+  try {
+    const accessKey = process.env.KALSHI_ACCESS_KEY;
+    const privateKey = process.env.KALSHI_PRIVATE_KEY;
+    if (accessKey && privateKey) {
+      const { generateKalshiHeaders } = await import('./kalshi-auth');
+      const HOST = 'https://api.elections.kalshi.com';
+      const path = '/trade-api/v2/events';
+      const params = new URLSearchParams({ status: 'open', limit: '200', with_nested_markets: 'true' });
+      const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
+
+      const res = await fetch(`${HOST}${path}?${params}`, {
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...authHeaders },
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const FAST_PREFIXES = ['KXBTC', 'KXETH', 'KXSOL', 'KXDOGE', 'KXXBT', 'KXAVAX', 'KXLINK', 'KXBNB', 'KXDOT', 'KXXRP'];
+        for (const event of (data.events || []) as any[]) {
+          const ticker = (event.event_ticker || '').toUpperCase();
+          if (!FAST_PREFIXES.some(p => ticker.startsWith(p))) continue;
+
+          const nested: any[] = event.markets || [];
+          const first = nested[0];
+          if (!first) continue;
+
+          const closeMs = new Date(first.close_time || first.expected_expiration_time || 0).getTime();
+          if (closeMs <= nowMs || closeMs > cutoffMs) continue;
+
+          const minsLeft = Math.round((closeMs - nowMs) / 60_000);
+          const seriesTicker = event.series_ticker || '';
+          const kalshiSlug = seriesTicker
+            ? `${seriesTicker.toLowerCase()}/${event.event_ticker.toLowerCase()}`
+            : event.event_ticker.toLowerCase();
+          const imageUrl = seriesTicker
+            ? `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`
+            : '';
+
+          const outcomes = nested.map((m: any, idx: number) => {
+            let p = m.last_price != null && m.last_price > 0 ? m.last_price / 100
+              : m.yes_bid != null ? m.yes_bid / 100
+              : m.yes_ask != null ? m.yes_ask / 100 : 0.5;
+            p = Math.max(0.01, Math.min(0.99, p));
+            const name = (m.subtitle || m.yes_sub_title || m.title || '')
+              .replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim() || `Option ${idx + 1}`;
+            return { id: m.ticker || `${event.event_ticker}-${idx}`, name, price: p };
+          });
+
+          const primaryPrice = outcomes.length > 0
+            ? Math.max(...outcomes.map((o: any) => o.price))
+            : 0.5;
+          const totalVol = nested.reduce((s: number, m: any) => s + (m.volume || 0), 0);
+
+          markets.push({
+            id: `kalshi-fast-${event.event_ticker}`,
+            conditionId: event.event_ticker,
+            provider: 'Kalshi',
+            name: event.title || event.event_ticker,
+            eventTitle: event.title || event.event_ticker,
+            description: `Resolves in ~${minsLeft} min`,
+            price: primaryPrice,
+            outcomes,
+            imageUrl,
+            polymarketUrl: `https://kalshi.com/markets/${kalshiSlug}`,
+            kalshiUrl: `https://kalshi.com/markets/${kalshiSlug}`,
+            slug: event.event_ticker.toLowerCase(),
+            volume: totalVol,
+            volumeFormatted: formatVolume(totalVol),
+            category: 'Fast Markets',
+            last_updated: new Date().toISOString(),
+            resolutionDate: first.close_time || first.expected_expiration_time || '',
+            change: 0,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[FastMarkets] Kalshi error:', err);
+  }
+
+  // Sort soonest-resolving first
+  markets.sort((a, b) => {
+    const at = a.resolutionDate ? new Date(a.resolutionDate).getTime() : 0;
+    const bt = b.resolutionDate ? new Date(b.resolutionDate).getTime() : 0;
+    return at - bt;
+  });
+
+  console.log(`[FastMarkets] ${markets.length} fast crypto markets found (within 1h)`);
+  return markets;
+}

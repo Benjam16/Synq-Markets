@@ -228,6 +228,7 @@ export default function TerminalPage() {
   const [filterWhaleOnly, setFilterWhaleOnly] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
   const [filterTradeTier, setFilterTradeTier] = useState<'all' | 'low' | 'medium' | 'high'>('all');
+  const [filterFastOnly, setFilterFastOnly] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
@@ -727,13 +728,15 @@ export default function TerminalPage() {
     if (filterTradeTier === 'low' && t.notional > 250) return false;
     if (filterTradeTier === 'medium' && (t.notional <= 250 || t.notional > 3000)) return false;
     if (filterTradeTier === 'high' && t.notional <= 3000) return false;
+    // Fast markets only
+    if (filterFastOnly && (t.category || '').toLowerCase() !== 'fast markets') return false;
     // Search
     if (filterSearch) {
       const q = filterSearch.toLowerCase();
       if (!t.marketName.toLowerCase().includes(q) && !t.marketId.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [trades, liveSubTab, filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch, filterTradeTier]);
+  }), [trades, liveSubTab, filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch, filterTradeTier, filterFastOnly]);
 
   // Count active filters for badge
   const activeFilterCount = useMemo(() => {
@@ -746,8 +749,9 @@ export default function TerminalPage() {
     if (filterWhaleOnly) count++;
     if (filterSearch) count++;
     if (filterTradeTier !== 'all') count++;
+    if (filterFastOnly) count++;
     return count;
-  }, [filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch]);
+  }, [filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch, filterFastOnly]);
 
   const clearAllFilters = useCallback(() => {
     setFilterProvider('all');
@@ -758,6 +762,7 @@ export default function TerminalPage() {
     setFilterWhaleOnly(false);
     setFilterSearch('');
     setFilterTradeTier('all');
+    setFilterFastOnly(false);
   }, []);
 
   // ── Activity Heatmap (last 60 seconds) ──
@@ -1354,6 +1359,19 @@ export default function TerminalPage() {
                     }`}
                   >
                     🐋 WHALES
+                  </button>
+
+                  <div className="w-px h-5 bg-[#1A1A1A] mx-1" />
+
+                  <button
+                    onClick={() => setFilterFastOnly(!filterFastOnly)}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterFastOnly
+                        ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    ⚡ FAST
                   </button>
 
                   {/* Advanced filters toggle */}

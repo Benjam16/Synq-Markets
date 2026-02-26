@@ -177,6 +177,27 @@ async function ensureMarketInfoMap(): Promise<void> {
     console.warn('[Terminal] Failed to build Polymarket name map:', err);
   }
 
+  // ── Overlay fast crypto markets (category: 'Fast Markets') ──────────────
+  try {
+    const { fetchFastCryptoMarkets } = await import('./market-fetchers');
+    const fastMkts = await fetchFastCryptoMarkets();
+    for (const fm of fastMkts) {
+      const key = (fm.conditionId || fm.id || '').toLowerCase();
+      if (!key) continue;
+      const info: MarketInfo = {
+        name: fm.eventTitle || fm.name || '',
+        externalUrl: fm.kalshiUrl || fm.polymarketUrl || '',
+        category: 'Fast Markets',
+        imageUrl: fm.imageUrl || '',
+      };
+      if (key) m.set(key, info);
+      if (fm.slug) m.set(fm.slug.toLowerCase(), info);
+    }
+    console.log(`[Terminal] Added ${fastMkts.length} fast crypto markets to info map`);
+  } catch (err) {
+    console.warn('[Terminal] Fast markets overlay error:', err);
+  }
+
   if (m.size > 0) {
     _marketInfoMap = m;
     _marketInfoMapAge = now;
@@ -874,10 +895,42 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
   const synMid  = realMid.length  < PER_TIER ? generateSyntheticTrades(PER_TIER - realMid.length,  'medium', baseTs) : [];
   const synHigh = realHigh.length < PER_TIER ? generateSyntheticTrades(PER_TIER - realHigh.length, 'high',   baseTs) : [];
 
+  // ── Synthetic fast-market trades (≤ 25 per snapshot, drawn from Fast Markets entries) ──
+  const fastEntries = Array.from(_marketInfoMap.entries()).filter(([, v]) => v.category === 'Fast Markets');
+  const synFast: TerminalTrade[] = [];
+  const FAST_COUNT = Math.min(25, fastEntries.length);
+  for (let i = 0; i < FAST_COUNT; i++) {
+    const [ticker, info] = fastEntries[Math.floor(Math.random() * fastEntries.length)];
+    const isKalshi = info.externalUrl?.includes('kalshi.com');
+    const price = 0.08 + Math.random() * 0.84;
+    const tier = Math.random() < 0.5 ? 'low' : 'medium';
+    const shares = tieredShares(price, tier as 'low' | 'medium');
+    const notional = price * shares;
+    synFast.push({
+      id: `syn-fast-${baseTs}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+      provider: isKalshi ? 'Kalshi' : 'Polymarket',
+      type: Math.random() > 0.5 ? 'FILL' : 'ORDER',
+      marketId: ticker,
+      marketName: info.name,
+      side: Math.random() > 0.4 ? 'Yes' : 'No',
+      price,
+      priceCents: `${(price * 100).toFixed(1)}¢`,
+      shares,
+      notional,
+      fee: Math.round(notional * 0.02 * 100) / 100,
+      timestamp: new Date(baseTs - i * 23).toISOString(),
+      isWhale: notional >= WHALE_THRESHOLD,
+      externalUrl: info.externalUrl,
+      category: 'Fast Markets',
+      imageUrl: info.imageUrl || '',
+    });
+  }
+
   const allTrades: TerminalTrade[] = [
     ...realLow.slice(0, PER_TIER),  ...synLow,
     ...realMid.slice(0, PER_TIER),  ...synMid,
     ...realHigh.slice(0, PER_TIER), ...synHigh,
+    ...synFast,
   ];
 
   // Fisher-Yates shuffle so tiers don't appear as blocks
@@ -885,7 +938,7 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     const j = Math.floor(Math.random() * (i + 1));
     [allTrades[i], allTrades[j]] = [allTrades[j], allTrades[i]];
   }
-  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi → low:${realLow.length}+${synLow.length} mid:${realMid.length}+${synMid.length} high:${realHigh.length}+${synHigh.length} = ${allTrades.length}`);
+  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi → low:${realLow.length}+${synLow.length} mid:${realMid.length}+${synMid.length} high:${realHigh.length}+${synHigh.length} fast:${synFast.length} = ${allTrades.length}`);
 
   // Update caches
   const existingIds = new Set(tradeCache.map(t => t.id));
