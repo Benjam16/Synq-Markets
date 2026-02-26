@@ -52,8 +52,17 @@ export default function PortalLoader({ children }: PortalLoaderProps) {
 
   useEffect(() => {
     setMounted(true);
-    
-    const loadTime = 6000 + seededRandom(42) * 3000;
+
+    // Skip the full animation on return visits — go straight to content
+    const hasVisited = sessionStorage.getItem('prop-market-loaded');
+    if (hasVisited) {
+      setIsLoading(false);
+      setProgress(100);
+      return;
+    }
+
+    // First visit: show loader but cap at 4s (not 6-9s)
+    const loadTime = 3500;
     const startTime = Date.now();
     let animationFrame: number;
     
@@ -75,11 +84,15 @@ export default function PortalLoader({ children }: PortalLoaderProps) {
         setWarpSpeed(true);
         setTimeout(() => {
           setPortalOpen(true);
-          setTimeout(() => setIsLoading(false), 1200);
-        }, 600);
+          setTimeout(() => {
+            setIsLoading(false);
+            sessionStorage.setItem('prop-market-loaded', '1');
+          }, 800);
+        }, 400);
       }
     };
 
+    // Prefetch critical data during animation
     fetch('/api/markets/trending?limit=9').catch(() => {});
     fetch('/api/terminal/feed').catch(() => {});
     

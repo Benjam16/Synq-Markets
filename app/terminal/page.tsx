@@ -1736,12 +1736,9 @@ export default function TerminalPage() {
                     <p className="text-xs mt-1 text-slate-600">The stream will populate as markets are active</p>
                   </div>
                 ) : (
-                  filteredTrades.map((trade, idx) => (
-                    <motion.div
+                  filteredTrades.slice(0, 150).map((trade, idx) => (
+                    <div
                       key={trade.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.15, delay: idx < 5 ? idx * 0.03 : 0 }}
                       className={`flex items-center gap-4 px-4 py-3 rounded-lg border transition-colors ${
                         trade.isWhale
                           ? 'bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/10'
@@ -1811,7 +1808,7 @@ export default function TerminalPage() {
 
                       {/* Action Buttons */}
                       <ActionButtons trade={trade} />
-                    </motion.div>
+                    </div>
                   ))
                 )}
               </div>

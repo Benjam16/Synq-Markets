@@ -100,20 +100,15 @@ export default function MarketsPage() {
       try {
         const isInitial = !initialLoadComplete;
         
-        // Fetch ALL markets (no limit or very high limit)
-        // Don't use abort signal on initial load to prevent cancellation
-        const fetchOptions: RequestInit = {
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache' },
-        };
-        
+        const fetchOptions: RequestInit = {};
+
         // Only add abort signal after initial load completes
         if (initialLoadComplete) {
           fetchOptions.signal = currentAbortController.signal;
         }
         
-        // Fetch all markets - use high limit to get all 3000+ markets
-        const res = await fetch(`/api/markets?limit=5000&_t=${Date.now()}`, fetchOptions);
+        // Fetch all markets — let the server-side 60s cache handle freshness
+        const res = await fetch(`/api/markets?limit=5000`, fetchOptions);
         
         if (!mounted) {
           return;

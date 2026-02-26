@@ -22,14 +22,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer);
   }, [pathname]);
 
-  // Background prefetch: warm up markets cache (shared across all routes)
+  // Background prefetch: warm up caches and prefetch heavy routes
   useEffect(() => {
     const prefetchTimer = setTimeout(() => {
-      // Fire-and-forget — warm the server-side market cache for all routes
       fetch('/api/markets/trending?limit=9', { priority: 'low' as any }).catch(() => {});
-    }, 2000);
+      // Prefetch heavy page bundles in background
+      router.prefetch('/markets');
+      router.prefetch('/terminal');
+      router.prefetch('/dashboard');
+    }, 1500);
     return () => clearTimeout(prefetchTimer);
-  }, []);
+  }, [router]);
 
   // Check admin status
   useEffect(() => {

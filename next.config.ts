@@ -2,14 +2,15 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
-  // Performance optimizations (swcMinify is default in Next.js 16)
   compress: true,
-  
-  // Optimize images
+  poweredByHeader: false,
+  reactStrictMode: false,
+
   images: {
     formats: ['image/avif', 'image/webp'],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+    minimumCacheTTL: 3600,
     remotePatterns: [
       { protocol: 'https', hostname: 'kalshi-public-docs.s3.amazonaws.com' },
       { protocol: 'https', hostname: 'polymarket.com' },
@@ -18,9 +19,32 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  // Optimize bundle
   experimental: {
-    optimizePackageImports: ['lucide-react', 'recharts', 'framer-motion'],
+    optimizePackageImports: ['lucide-react', 'recharts', 'framer-motion', '@supabase/supabase-js'],
+  },
+
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-DNS-Prefetch-Control', value: 'on' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+        ],
+      },
+      {
+        source: '/api/markets',
+        headers: [
+          { key: 'Cache-Control', value: 'public, s-maxage=30, stale-while-revalidate=60' },
+        ],
+      },
+      {
+        source: '/api/markets/trending',
+        headers: [
+          { key: 'Cache-Control', value: 'public, s-maxage=10, stale-while-revalidate=30' },
+        ],
+      },
+    ];
   },
 };
 
