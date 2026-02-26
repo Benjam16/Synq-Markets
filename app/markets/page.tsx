@@ -226,18 +226,20 @@ export default function MarketsPage() {
   // ── Build Fast tab from BOTH fast API + client-side filter of main markets
   const combinedFastMarkets = useMemo(() => {
     const CRYPTO_KW = ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'xrp', 'doge', 'avax', 'link', 'bnb', 'hyperliquid'];
-    const in24h = Date.now() + 24 * 60 * 60 * 1000;
-    // Client-side filter: "Up or Down" crypto markets resolving within 24 hours
+    const nowMs = Date.now();
+    const in24h = nowMs + 24 * 60 * 60 * 1000;
+    // Client-side filter: "Up or Down" crypto markets resolving within 24 hours AND not yet resolved
     const fromMain = markets.filter(m => {
       const name = (m.name || m.eventTitle || '').toLowerCase();
       const isUpDown = name.includes('up or down') || name.includes('up/down');
       if (!isUpDown) return false;
       const cat = (m.category || '').toLowerCase();
       if (!(cat === 'crypto' || CRYPTO_KW.some(kw => name.includes(kw)))) return false;
-      // Only same-day / within-24h
       if (m.resolutionDate) {
         try {
           const resMs = new Date(m.resolutionDate).getTime();
+          // Exclude already-resolved markets (60s grace) and far-future markets
+          if (resMs < nowMs - 60_000) return false;
           if (resMs > in24h) return false;
         } catch { /* keep */ }
       }
@@ -247,14 +249,25 @@ export default function MarketsPage() {
     const seen = new Set<string>();
     const merged: Market[] = [];
     for (const m of [...fastMarkets, ...fromMain]) {
-      if (seen.has(m.id)) continue;
-      seen.add(m.id);
-      merged.push(m);
+      if (!m.resolutionDate) {
+        if (!seen.has(m.id)) { seen.add(m.id); merged.push(m); }
+        continue;
+      }
+      try {
+        const resMs = new Date(m.resolutionDate).getTime();
+        // Skip already-resolved markets (60s grace period)
+        if (resMs < nowMs - 60_000) continue;
+      } catch { /* keep */ }
+      if (!seen.has(m.id)) { seen.add(m.id); merged.push(m); }
     }
-    // Sort by volume descending
-    merged.sort((a, b) => (b.volume || 0) - (a.volume || 0));
+    // Sort: soonest-resolving first so traders see the most urgent markets
+    merged.sort((a, b) => {
+      const aMs = a.resolutionDate ? new Date(a.resolutionDate).getTime() : Infinity;
+      const bMs = b.resolutionDate ? new Date(b.resolutionDate).getTime() : Infinity;
+      return aMs - bMs;
+    });
     return merged;
-  }, [markets, fastMarkets]);
+  }, [markets, fastMarkets, now]);
 
   // Group markets by event (slug) - Polymarket style: one card per event
   const groupedMarkets = useMemo(() => {
@@ -789,7 +802,7 @@ export default function MarketsPage() {
     return +(stakeNum * parlayMultiplier).toFixed(2);
   }, [parlayStake, parlayMultiplier]);
 
-  const addParlayLeg = useCallback((market: Market, outcome: 'yes' | 'no') => {
+  const addParlayLeg = useCallback((market: Market, outcome: 'yes' | 'no', outcomeName?: string) => {
     if (parlayLegs.length >= 6) {
       toast.error('Maximum 6 legs per parlay');
       return;
@@ -802,6 +815,9 @@ export default function MarketsPage() {
     }
     const price = outcome === 'yes' ? market.price : 1 - market.price;
     const safeprice = Math.max(0.01, Math.min(0.99, price));
+    const displayName = outcomeName
+      ? `${outcomeName} — ${market.eventTitle || market.name}`
+      : (market.eventTitle || market.name);
     setParlayLegs(prev => [
       ...prev,
       {
@@ -809,7 +825,7 @@ export default function MarketsPage() {
         provider: market.provider || 'polymarket',
         outcome,
         price: safeprice,
-        marketName: market.eventTitle || market.name,
+        marketName: displayName,
         status: 'pending',
       },
     ]);
@@ -969,30 +985,41 @@ export default function MarketsPage() {
               </div>
 
               {/* Multi-Bet Toggle */}
-              <button
-                onClick={() => {
-                  if (parlayMode) {
-                    clearParlay();
-                    setParlayMode(false);
-                  } else {
-                    setParlayMode(true);
-                    setParlaySlipOpen(true);
-                  }
-                }}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all border ${
-                  parlayMode
-                    ? 'bg-violet-500/20 text-violet-300 border-violet-500/40'
-                    : 'text-slate-400 border-white/10 hover:text-white hover:border-white/20 bg-white/[0.03]'
-                }`}
-              >
-                <Layers className="w-3 h-3" />
-                Multi-Bet
-                {parlayLegs.length > 0 && (
-                  <span className="ml-0.5 w-4 h-4 rounded-full bg-violet-500 text-white text-[9px] flex items-center justify-center font-black">
-                    {parlayLegs.length}
-                  </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    if (parlayMode) {
+                      // Toggle slip visibility when already active
+                      setParlaySlipOpen(prev => !prev);
+                    } else {
+                      setParlayMode(true);
+                      setParlaySlipOpen(true);
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all border ${
+                    parlayMode
+                      ? 'bg-violet-500/20 text-violet-300 border-violet-500/40'
+                      : 'text-slate-400 border-white/10 hover:text-white hover:border-white/20 bg-white/[0.03]'
+                  }`}
+                >
+                  <Layers className="w-3 h-3" />
+                  Multi-Bet
+                  {parlayLegs.length > 0 && (
+                    <span className="ml-0.5 w-4 h-4 rounded-full bg-violet-500 text-white text-[9px] flex items-center justify-center font-black">
+                      {parlayLegs.length}
+                    </span>
+                  )}
+                </button>
+                {parlayMode && (
+                  <button
+                    onClick={() => { clearParlay(); setParlayMode(false); }}
+                    title="Cancel Multi-Bet"
+                    className="w-6 h-6 flex items-center justify-center rounded-full bg-white/5 border border-white/10 text-slate-500 hover:text-red-400 hover:border-red-400/30 transition-all"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
                 )}
-              </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1105,7 +1132,6 @@ export default function MarketsPage() {
                   market={eventGroup.mainMarket}
                   onBuy={handleBuy}
                   onSelect={() => {
-                    if (parlayMode) return; // disable expansion in parlay mode
                     setSelectedEvent({
                       key: eventGroup.key,
                       eventTitle: eventGroup.eventTitle,
@@ -1144,18 +1170,16 @@ export default function MarketsPage() {
           >
             <Layers className="w-3.5 h-3.5 text-violet-400" />
             <span className="text-[11px] font-bold text-violet-200">
-              Multi-Bet active — click YES / NO on any market to add a leg
+              Multi-Bet active — open a market or click YES / NO to add a leg
             </span>
             <span className="text-violet-400 font-black text-[11px]">{parlayLegs.length}/6</span>
-            {parlayLegs.length > 0 && (
-              <button
-                onClick={() => setParlaySlipOpen(true)}
-                className="px-3 py-1 rounded-full bg-violet-500/30 text-violet-200 text-[10px] font-bold hover:bg-violet-500/50 transition-all"
-              >
-                View Slip
-              </button>
-            )}
-            <button onClick={() => { clearParlay(); setParlayMode(false); }} className="text-violet-500 hover:text-violet-200 transition-colors">
+            <button
+              onClick={() => setParlaySlipOpen(prev => !prev)}
+              className="px-3 py-1 rounded-full bg-violet-500/30 text-violet-200 text-[10px] font-bold hover:bg-violet-500/50 transition-all"
+            >
+              {parlaySlipOpen ? 'Hide Slip' : 'View Slip'}
+            </button>
+            <button onClick={() => { clearParlay(); setParlayMode(false); }} title="Cancel Multi-Bet" className="text-violet-500 hover:text-red-400 transition-colors">
               <X className="w-3.5 h-3.5" />
             </button>
           </motion.div>
@@ -1166,13 +1190,13 @@ export default function MarketsPage() {
       <AnimatePresence>
         {parlaySlipOpen && (
           <>
-            {/* Backdrop */}
+            {/* Backdrop - click to close slip but keep mode active */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setParlaySlipOpen(false)}
-              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+              className="fixed inset-0 z-40 bg-black/20"
             />
             {/* Slip */}
             <motion.div
@@ -1335,7 +1359,7 @@ export default function MarketsPage() {
       </AnimatePresence>
 
       {/* Trade Panel - Shows all markets for the event */}
-      {!parlayMode && selectedEvent && (
+      {selectedEvent && (
         <TradePanel
           eventMarkets={selectedEvent.markets}
           eventTitle={selectedEvent.eventTitle}
@@ -1343,6 +1367,11 @@ export default function MarketsPage() {
           onClose={() => {
             setIsTradePanelOpen(false);
             setSelectedEvent(null);
+          }}
+          parlayMode={parlayMode}
+          onAddToParlay={(market, side, outcomeName) => {
+            addParlayLeg(market, side, outcomeName);
+            setParlaySlipOpen(true);
           }}
           onTrade={() => {
             router.push('/dashboard');

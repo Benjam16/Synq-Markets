@@ -24,9 +24,11 @@ interface TradePanelProps {
   isOpen: boolean;
   onClose: () => void;
   onTrade: (market: Market, side: 'yes' | 'no', quantity: number) => void;
+  parlayMode?: boolean;
+  onAddToParlay?: (market: Market, side: 'yes' | 'no', outcomeName?: string) => void;
 }
 
-export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, onClose, onTrade }: TradePanelProps) {
+export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, onClose, onTrade, parlayMode, onAddToParlay }: TradePanelProps) {
   // Use eventMarkets if provided, otherwise fall back to single market
   const markets = eventMarkets || (market ? [market] : []);
   const displayTitle = eventTitle || market?.eventTitle || market?.name || "Market";
@@ -813,16 +815,22 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         e.preventDefault();
-                                        setSelectedMarket(mkt);
-                                        setSelectedOutcome(yesOutcome?.id || null);
+                                        if (parlayMode && onAddToParlay) {
+                                          onAddToParlay(mkt, 'yes');
+                                        } else {
+                                          setSelectedMarket(mkt);
+                                          setSelectedOutcome(yesOutcome?.id || null);
+                                        }
                                       }}
                                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                        yesSelected
-                                          ? 'bg-[#4FFFC8] text-[#050505]'
-                                          : 'bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30'
+                                        parlayMode
+                                          ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
+                                          : yesSelected
+                                            ? 'bg-[#4FFFC8] text-[#050505]'
+                                            : 'bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30'
                                       }`}
                                     >
-                                      Buy Yes {yesPrice.toFixed(2)}¢
+                                      {parlayMode ? '+ Add YES' : `Buy Yes ${yesPrice.toFixed(2)}¢`}
                                     </button>
                                   </div>
                                   
@@ -841,16 +849,22 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         e.preventDefault();
-                                        setSelectedMarket(mkt);
-                                        setSelectedOutcome(noOutcome?.id || null);
+                                        if (parlayMode && onAddToParlay) {
+                                          onAddToParlay(mkt, 'no');
+                                        } else {
+                                          setSelectedMarket(mkt);
+                                          setSelectedOutcome(noOutcome?.id || null);
+                                        }
                                       }}
                                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                        noSelected
-                                          ? 'bg-[#4FFFC8] text-[#050505]'
-                                          : 'bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30'
+                                        parlayMode
+                                          ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
+                                          : noSelected
+                                            ? 'bg-[#4FFFC8] text-[#050505]'
+                                            : 'bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30'
                                       }`}
                                     >
-                                      Buy No {noPrice.toFixed(2)}¢
+                                      {parlayMode ? '+ Add NO' : `Buy No ${noPrice.toFixed(2)}¢`}
                                     </button>
                                   </div>
                                 </div>
@@ -948,36 +962,46 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               e.preventDefault();
-                                              setSelectedMarket(mkt);
-                                              setSelectedOutcome(outcome.id);
-                                              setTradeSide('yes'); // Trading "Yes" on this outcome
+                                              if (parlayMode && onAddToParlay) {
+                                                onAddToParlay(mkt, 'yes', outcome.name);
+                                              } else {
+                                                setSelectedMarket(mkt);
+                                                setSelectedOutcome(outcome.id);
+                                                setTradeSide('yes');
+                                              }
                                             }}
                                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                              isSelected && tradeSide === 'yes'
-                                                ? 'bg-[#4FFFC8] text-[#050505]'
-                                                : 'bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30'
+                                              parlayMode
+                                                ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
+                                                : isSelected && tradeSide === 'yes'
+                                                  ? 'bg-[#4FFFC8] text-[#050505]'
+                                                  : 'bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30'
                                             }`}
                                           >
-                                            Buy Yes {outcomePrice.toFixed(2)}¢
+                                            {parlayMode ? '+ Add YES' : `Buy Yes ${outcomePrice.toFixed(2)}¢`}
                                           </button>
                                           <button
                                             type="button"
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               e.preventDefault();
-                                              // For multi-choice markets, "Buy No" means trading "No" on THIS specific outcome
-                                              // Keep the same outcome selected, but set tradeSide to 'no'
-                                              setSelectedMarket(mkt);
-                                              setSelectedOutcome(outcome.id); // Keep THIS outcome selected
-                                              setTradeSide('no'); // Trading "No" on this outcome
+                                              if (parlayMode && onAddToParlay) {
+                                                onAddToParlay(mkt, 'no', outcome.name);
+                                              } else {
+                                                setSelectedMarket(mkt);
+                                                setSelectedOutcome(outcome.id);
+                                                setTradeSide('no');
+                                              }
                                             }}
                                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                              isSelected && tradeSide === 'no'
-                                                ? 'bg-[#4FFFC8] text-[#050505]'
-                                                : 'bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30'
+                                              parlayMode
+                                                ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
+                                                : isSelected && tradeSide === 'no'
+                                                  ? 'bg-[#4FFFC8] text-[#050505]'
+                                                  : 'bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30'
                                             }`}
                                           >
-                                            Buy No {noPrice.toFixed(2)}¢
+                                            {parlayMode ? '+ Add NO' : `Buy No ${noPrice.toFixed(2)}¢`}
                                           </button>
                                         </div>
                                       </div>
@@ -1307,46 +1331,53 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                         </div>
                       )}
 
-                      <motion.button
-                        onClick={handleTrade}
-                        disabled={!user || Number(quantity) <= 0 || !selectedOutcome || tradeStatus === 'processing'}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        className={`btn-premium ${tradeType === 'buy' && tradeStatus === 'idle' ? 'shimmer' : ''} w-full p-4 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
-                          tradeStatus === 'success'
-                            ? 'bg-green-600 text-white'
-                            : tradeStatus === 'error'
-                            ? 'bg-red-600 text-white'
-                            : tradeStatus === 'processing'
-                            ? 'bg-yellow-600 text-white animate-pulse'
-                            : tradeType === 'sell'
-                            ? 'bg-red-600 hover:bg-red-700 text-white'
-                            : 'bg-[#4FFFC8] hover:bg-[#3debb8] text-[#050505]'
-                        }`}
-                      >
-                        {tradeStatus === 'processing' ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            <span>Processing...</span>
-                          </>
-                        ) : tradeStatus === 'success' ? (
-                          <>
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                            <span>Success!</span>
-                          </>
-                        ) : tradeStatus === 'error' ? (
-                          <>
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                            <span>Error</span>
-                          </>
-                        ) : (
-                          <span>{tradeType === 'sell' ? 'Sell' : 'Buy'}</span>
-                        )}
-                      </motion.button>
+                      {parlayMode ? (
+                        <div className="w-full p-4 rounded-lg border border-violet-500/30 bg-violet-500/10 text-center">
+                          <p className="text-violet-300 text-sm font-medium">Multi-Bet Mode Active</p>
+                          <p className="text-slate-500 text-xs mt-0.5">Click &quot;+ Add YES&quot; or &quot;+ Add NO&quot; above to add a leg to your slip</p>
+                        </div>
+                      ) : (
+                        <motion.button
+                          onClick={handleTrade}
+                          disabled={!user || Number(quantity) <= 0 || !selectedOutcome || tradeStatus === 'processing'}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          className={`btn-premium ${tradeType === 'buy' && tradeStatus === 'idle' ? 'shimmer' : ''} w-full p-4 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+                            tradeStatus === 'success'
+                              ? 'bg-green-600 text-white'
+                              : tradeStatus === 'error'
+                              ? 'bg-red-600 text-white'
+                              : tradeStatus === 'processing'
+                              ? 'bg-yellow-600 text-white animate-pulse'
+                              : tradeType === 'sell'
+                              ? 'bg-red-600 hover:bg-red-700 text-white'
+                              : 'bg-[#4FFFC8] hover:bg-[#3debb8] text-[#050505]'
+                          }`}
+                        >
+                          {tradeStatus === 'processing' ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Processing...</span>
+                            </>
+                          ) : tradeStatus === 'success' ? (
+                            <>
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                              <span>Success!</span>
+                            </>
+                          ) : tradeStatus === 'error' ? (
+                            <>
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                              <span>Error</span>
+                            </>
+                          ) : (
+                            <span>{tradeType === 'sell' ? 'Sell' : 'Buy'}</span>
+                          )}
+                        </motion.button>
+                      )}
                     </div>
                   </div>
                 )}
