@@ -745,10 +745,10 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                     </div>
                   )}
                   
-                  <div className="flex items-center gap-6">
+                  <div className="flex flex-wrap items-center gap-3 md:gap-6">
                     <div>
                       <span className="text-sm text-slate-400">Volume: </span>
-                      <span className="text-lg mono-number volume font-bold text-[#4FFFC8]">
+                      <span className="text-base md:text-lg mono-number volume font-bold text-[#4FFFC8]">
                         {selectedMarket.volumeFormatted || (selectedMarket.volume ? `$${(selectedMarket.volume / 1000).toFixed(1)}k` : 'N/A')}
                       </span>
                     </div>
@@ -797,28 +797,19 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                             
                             return (
                               <div className="space-y-2">
-                                {/* Single Row for Binary Market */}
-                                <div className="flex items-center justify-between p-4 rounded-lg border-2 border-white/5 bg-slate-950/50 backdrop-blur-md">
-                                  {/* Market Question/Name */}
-                                  <div className="flex items-center gap-3 flex-1">
-                                    <div className="text-base font-medium text-white">
+                                {/* Binary Market — stacked on mobile */}
+                                <div className="p-3 md:p-4 rounded-lg border-2 border-white/5 bg-slate-950/50 backdrop-blur-md">
+                                  {/* Name row */}
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <div className="text-sm md:text-base font-medium text-white truncate">
                                       {mkt.name?.includes(' - ') ? mkt.name.split(' - ')[0] : displayTitle}
                                     </div>
-                                    <div className="text-xs text-slate-500 font-mono">
+                                    <div className="text-[10px] md:text-xs text-slate-500 font-mono flex-shrink-0">
                                       {mkt.volumeFormatted || '$0'} Vol.
                                     </div>
                                   </div>
-                                  
-                                  {/* Yes Option */}
-                                  <div className="flex items-center gap-3">
-                                    <div className="text-right">
-                                      <div className={`text-lg mono-number font-bold ${yesSelected ? 'text-[#4FFFC8]' : 'text-white'}`}>
-                                        ${yesPrice.toFixed(2)}
-                                      </div>
-                                      <div className="text-xs text-slate-500 mono-number percentage">
-                                        {(yesPrice * 100).toFixed(1)}%
-                                      </div>
-                                    </div>
+                                  {/* Buttons row — always fits */}
+                                  <div className="grid grid-cols-2 gap-2">
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -831,7 +822,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                           setSelectedOutcome(yesOutcome?.id || null);
                                         }
                                       }}
-                                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                      className={`flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                                         parlayMode
                                           ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
                                           : yesSelected
@@ -839,20 +830,9 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                             : 'bg-green-600/20 text-green-400 border border-green-600/30 hover:bg-green-600/30'
                                       }`}
                                     >
-                                      {parlayMode ? '+ Add YES' : `Buy Yes ${yesPrice.toFixed(2)}¢`}
+                                      <span className="text-xs font-bold">{parlayMode ? '+ Add YES' : 'Buy Yes'}</span>
+                                      <span className="mono-number text-[11px] opacity-80">${yesPrice.toFixed(2)} · {(yesPrice * 100).toFixed(1)}%</span>
                                     </button>
-                                  </div>
-                                  
-                                  {/* No Option */}
-                                  <div className="flex items-center gap-3">
-                                    <div className="text-right">
-                                      <div className={`text-lg mono-number font-bold ${noSelected ? 'text-[#4FFFC8]' : 'text-white'}`}>
-                                        ${noPrice.toFixed(2)}
-                                      </div>
-                                      <div className="text-xs text-slate-500 font-mono">
-                                        {(noPrice * 100).toFixed(1)}%
-                                      </div>
-                                    </div>
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -865,7 +845,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                           setSelectedOutcome(noOutcome?.id || null);
                                         }
                                       }}
-                                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                      className={`flex flex-col items-center gap-0.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                                         parlayMode
                                           ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
                                           : noSelected
@@ -873,7 +853,8 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                             : 'bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30'
                                       }`}
                                     >
-                                      {parlayMode ? '+ Add NO' : `Buy No ${noPrice.toFixed(2)}¢`}
+                                      <span className="text-xs font-bold">{parlayMode ? '+ Add NO' : 'Buy No'}</span>
+                                      <span className="mono-number text-[11px] opacity-80">${noPrice.toFixed(2)} · {(noPrice * 100).toFixed(1)}%</span>
                                     </button>
                                   </div>
                                 </div>
@@ -941,7 +922,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                           setTradeSide('yes');
                                         }
                                       }}
-                                      className={`flex items-center justify-between p-4 rounded-lg border-2 transition-all ${
+                                      className={`p-3 md:p-4 rounded-lg border-2 transition-all ${
                                         isOutcomeSettled
                                           ? 'border-white/5 bg-slate-900/30 opacity-50 cursor-default'
                                           : isSelected
@@ -949,42 +930,37 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                             : 'border-white/5 bg-slate-950/50 backdrop-blur-md hover:border-white/10 cursor-pointer'
                                       }`}
                                     >
-                                      {/* Outcome Name */}
-                                      <div className="flex items-center gap-3 flex-1">
-                                        <div className={`text-base font-medium ${isOutcomeSettled ? 'text-slate-500' : 'text-white'}`}>
-                                          {outcome.name}
-                                        </div>
-                                        {isOutcomeSettled ? (
-                                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                            settledResultText === 'Yes'
-                                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                                              : 'bg-red-500/10 text-red-400 border-red-500/20'
-                                          }`}>
-                                            Settled: {settledResultText}
-                                          </span>
-                                        ) : (
-                                          <div className="text-xs text-slate-500 font-mono">
-                                            {mkt.volumeFormatted || '$0'} Vol.
+                                      {/* Top: Name + Price */}
+                                      <div className="flex items-center justify-between gap-2 mb-2">
+                                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                                          <div className={`text-sm md:text-base font-medium truncate ${isOutcomeSettled ? 'text-slate-500' : 'text-white'}`}>
+                                            {outcome.name}
                                           </div>
-                                        )}
+                                          {isOutcomeSettled && (
+                                            <span className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                              settledResultText === 'Yes'
+                                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                                : 'bg-red-500/10 text-red-400 border-red-500/20'
+                                            }`}>
+                                              Settled: {settledResultText}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex-shrink-0 text-right">
+                                          <span className={`text-sm md:text-lg mono-number font-bold ${isOutcomeSettled ? 'text-slate-600' : isSelected ? 'text-[#4FFFC8]' : 'text-white'}`}>
+                                            ${outcomePrice.toFixed(2)}
+                                          </span>
+                                          <span className="ml-1 text-[10px] md:text-xs text-slate-500 mono-number">
+                                            {probability.toFixed(1)}%
+                                          </span>
+                                        </div>
                                       </div>
                                       
-                                      {/* Price and Probability */}
-                                      <div className="flex items-center gap-4">
-                                        <div className="text-right">
-                                          <div className={`text-lg mono-number font-bold ${isOutcomeSettled ? 'text-slate-600' : isSelected ? 'text-[#4FFFC8]' : 'text-white'}`}>
-                                            ${outcomePrice.toFixed(2)}
-                                          </div>
-                                          <div className="text-xs text-slate-500 mono-number percentage">
-                                            {probability.toFixed(1)}%
-                                          </div>
-                                        </div>
-                                        
-                                        {/* Buy Yes/No Buttons — hidden for settled outcomes */}
-                                        {isOutcomeSettled ? (
-                                          <div className="w-[180px] text-center text-[10px] text-slate-600 font-bold uppercase tracking-wider">Closed</div>
-                                        ) : (
-                                        <div className="flex gap-2 relative z-10" onClick={(e) => e.stopPropagation()}>
+                                      {/* Bottom: Buttons — always visible */}
+                                      {isOutcomeSettled ? (
+                                        <div className="text-center text-[10px] text-slate-600 font-bold uppercase tracking-wider py-1">Closed</div>
+                                      ) : (
+                                        <div className="grid grid-cols-2 gap-2 relative z-10" onClick={(e) => e.stopPropagation()}>
                                           <button
                                             type="button"
                                             onClick={(e) => {
@@ -998,7 +974,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                                 setTradeSide('yes');
                                               }
                                             }}
-                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                            className={`py-2 rounded-lg text-xs md:text-sm font-medium transition-all ${
                                               parlayMode
                                                 ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
                                                 : isSelected && tradeSide === 'yes'
@@ -1021,7 +997,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                                 setTradeSide('no');
                                               }
                                             }}
-                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                            className={`py-2 rounded-lg text-xs md:text-sm font-medium transition-all ${
                                               parlayMode
                                                 ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40 hover:bg-violet-500/30'
                                                 : isSelected && tradeSide === 'no'
@@ -1032,8 +1008,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                                             {parlayMode ? '+ Add NO' : `Buy No ${noPrice.toFixed(2)}¢`}
                                           </button>
                                         </div>
-                                        )}
-                                      </div>
+                                      )}
                                     </div>
                                   );
                                 })}
