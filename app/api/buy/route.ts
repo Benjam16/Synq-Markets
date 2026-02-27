@@ -41,42 +41,26 @@ export async function POST(req: NextRequest) {
   try {
     await client.query("BEGIN");
 
-    // Price resolution: ALWAYS trust the frontend-provided price (user sees the
-    // real live price on screen).  Fall back to cache/API only when absolutely needed.
+    // Price resolution: ALWAYS use live provider prices (Kalshi/Polymarket).
+    // Never trust terminal/UI-provided prices for execution.
     let currentPrice = 0;
-    const rawPrice = body.price;
-    const frontendPrice = (rawPrice !== undefined && rawPrice !== null)
-      ? Number(rawPrice)
-      : NaN;
-
-    console.log(`[Buy v3] Raw body.price=${JSON.stringify(rawPrice)} → frontendPrice=${frontendPrice} for ${provider}:${marketId}`);
-
-    if (!isNaN(frontendPrice) && frontendPrice > 0 && frontendPrice < 1) {
-      currentPrice = frontendPrice;
-      console.log(`[Buy v3] ✓ Using frontend price: ${currentPrice}`);
-    } else if (!isNaN(frontendPrice) && frontendPrice >= 1 && frontendPrice <= 100) {
-      // Price sent in cents (1-100) instead of dollars (0-1)
-      currentPrice = frontendPrice / 100;
-      console.log(`[Buy v3] ✓ Price was in cents, converted: ${frontendPrice} → ${currentPrice}`);
-    } else {
-      try {
-        const priceResult = await getMarketPriceFast(
-          provider,
-          marketId,
-          side as 'yes' | 'no',
-          outcome,
-          undefined
-        );
-        currentPrice = priceResult.price;
-        console.log(`[Buy] Price from ${priceResult.source} for ${provider}:${marketId}: ${currentPrice}`);
-      } catch (priceError) {
-        console.error('Error fetching current price:', priceError);
-        await client.query("ROLLBACK");
-        return NextResponse.json(
-          { error: "Failed to fetch current market price" },
-          { status: 500 },
-        );
-      }
+    try {
+      const priceResult = await getMarketPriceFast(
+        provider,
+        marketId,
+        side as 'yes' | 'no',
+        outcome,
+        undefined
+      );
+      currentPrice = priceResult.price;
+      console.log(`[Buy v4] Using live provider price from ${priceResult.source} for ${provider}:${marketId}: ${currentPrice}`);
+    } catch (priceError) {
+      console.error('Error fetching current price:', priceError);
+      await client.query("ROLLBACK");
+      return NextResponse.json(
+        { error: "Failed to fetch current market price" },
+        { status: 500 },
+      );
     }
 
     if (currentPrice <= 0) {
@@ -378,7 +362,6 @@ export async function POST(req: NextRequest) {
       cost,
       subscriptionId: subscription.id,
       priceUsed: currentPrice,
-      priceReceived: rawPrice,
       message: 'Trade executed successfully',
     });
   } catch (error: any) {

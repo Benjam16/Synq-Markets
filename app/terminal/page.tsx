@@ -482,7 +482,6 @@ export default function TerminalPage() {
           provider: providerLower,
           side,
           outcome: trade.side,
-          price: trade.price,
           quantity,
           marketName: trade.marketName,
           category: ('category' in trade ? (trade as TerminalTrade).category : '') || 'General',
