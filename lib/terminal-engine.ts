@@ -105,12 +105,25 @@ async function ensureMarketInfoMap(): Promise<void> {
 
           // Index by EACH nested market ticker (what the trades API returns)
           // Use market-specific title so the terminal shows the specific bet,
-          // e.g. "Leonardo DiCaprio – Oscars 2026: Best Actor Winner"
+          // e.g. "$65,750 to $65,999.99 – Bitcoin price range on Feb 27..."
           for (const mkt of (event.markets || [])) {
             if (mkt.ticker) {
               // Clean Kalshi's raw `::` / `--` prefix from subtitle fields
-              const rawTitle = mkt.title || mkt.subtitle || '';
-              const mktTitle = rawTitle.replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim();
+              const rawTitle = mkt.title || mkt.subtitle || mkt.yes_sub_title || '';
+              let mktTitle = rawTitle.replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim();
+
+              // Build range label from strike prices if the market title is missing
+              if (!mktTitle && mkt.floor_strike != null && mkt.cap_strike != null) {
+                const floor = Number(mkt.floor_strike);
+                const cap = Number(mkt.cap_strike);
+                const fmt = (n: number) => n >= 1000 ? `$${n.toLocaleString('en-US')}` : `$${n}`;
+                mktTitle = `${fmt(floor)} to ${fmt(cap)}`;
+              } else if (!mktTitle && mkt.floor_strike != null) {
+                mktTitle = `≥ $${Number(mkt.floor_strike).toLocaleString('en-US')}`;
+              } else if (!mktTitle && mkt.cap_strike != null) {
+                mktTitle = `≤ $${Number(mkt.cap_strike).toLocaleString('en-US')}`;
+              }
+
               // If the market has its own distinct title, combine it with the event title
               const specificName = (mktTitle && mktTitle.toLowerCase() !== title.toLowerCase())
                 ? `${mktTitle} – ${title}`
@@ -172,8 +185,16 @@ async function ensureMarketInfoMap(): Promise<void> {
               if (seriesTicker) m.set(seriesTicker.toLowerCase(), info);
               for (const mkt of (event.markets || [])) {
                 if (mkt.ticker) {
-                  const rawTitle = mkt.title || mkt.subtitle || '';
-                  const mktTitle = rawTitle.replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim();
+                  const rawTitle = mkt.title || mkt.subtitle || mkt.yes_sub_title || '';
+                  let mktTitle = rawTitle.replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim();
+                  if (!mktTitle && mkt.floor_strike != null && mkt.cap_strike != null) {
+                    const floor = Number(mkt.floor_strike);
+                    const cap = Number(mkt.cap_strike);
+                    const fmt = (n: number) => n >= 1000 ? `$${n.toLocaleString('en-US')}` : `$${n}`;
+                    mktTitle = `${fmt(floor)} to ${fmt(cap)}`;
+                  } else if (!mktTitle && mkt.floor_strike != null) {
+                    mktTitle = `≥ $${Number(mkt.floor_strike).toLocaleString('en-US')}`;
+                  }
                   const specificName = (mktTitle && mktTitle.toLowerCase() !== title.toLowerCase())
                     ? `${mktTitle} – ${title}`
                     : title;
@@ -599,10 +620,34 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
     await ensureMarketInfoMap();
 
     return rawTrades.slice(0, 50).map((t: any, idx: number) => {
-      const price = parseFloat(t.price || t.avg_price || '0.5');
+      // Polymarket CLOB: `outcome` = "Yes"/"No" (which token),
+      // `side` = "BUY"/"SELL" (direction). Use outcome for display side.
+      const outcomeRaw = (t.outcome || '').toLowerCase();
+      const directionRaw = (t.side || '').toLowerCase();
+
+      let displaySide: 'Yes' | 'No';
+      let displayPrice: number;
+      const rawPrice = parseFloat(t.price || t.avg_price || '0.5');
+
+      if (outcomeRaw === 'yes' || outcomeRaw === 'no') {
+        // Outcome available: use it directly
+        displaySide = outcomeRaw === 'yes' ? 'Yes' : 'No';
+        displayPrice = rawPrice;
+      } else if (directionRaw === 'buy') {
+        // No outcome field — BUY at low price (<0.5) is likely Yes
+        displaySide = rawPrice <= 0.5 ? 'Yes' : 'No';
+        displayPrice = rawPrice;
+      } else if (directionRaw === 'sell') {
+        // SELL = selling YES = effectively buying NO
+        displaySide = 'No';
+        displayPrice = 1 - rawPrice;
+      } else {
+        displaySide = rawPrice <= 0.5 ? 'Yes' : 'No';
+        displayPrice = rawPrice;
+      }
+
       const shares = parseInt(t.size || t.amount || t.count || '10');
-      const notional = price * shares;
-      const side = (t.side || t.outcome || 'Yes').toLowerCase();
+      const notional = displayPrice * shares;
       const tradeSlug = t.market_slug || '';
       const conditionId = t.market || t.asset_id || t.condition_id || '';
 
@@ -629,9 +674,9 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         type: (t.type || 'FILL').toUpperCase() as TerminalTrade['type'],
         marketId: conditionId || `poly-${idx}`,
         marketName,
-        side: side.includes('yes') || side.includes('up') ? 'Yes' : 'No',
-        price,
-        priceCents: `${(price * 100).toFixed(1)}¢`,
+        side: displaySide,
+        price: displayPrice,
+        priceCents: `${(displayPrice * 100).toFixed(1)}¢`,
         shares,
         notional,
         fee: parseFloat(t.fee || '0') || Math.round(notional * 0.02 * 100) / 100,

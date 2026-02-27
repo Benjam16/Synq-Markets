@@ -79,6 +79,7 @@ export default function ChartModal({
   const candleSeriesRef = useRef<any>(null);
   const maSeriesRef = useRef<any>(null);
   const initialPriceRef = useRef(trade.price);
+  const [livePrice, setLivePrice] = useState<number | null>(null);
   const [tradeSide, setTradeSide] = useState<'yes' | 'no'>('yes');
   const [tradeQuantity, setTradeQuantity] = useState(100);
   const [activeTab, setActiveTab] = useState<'chart' | 'book' | 'trades'>('chart');
@@ -119,7 +120,45 @@ export default function ChartModal({
 
   useEffect(() => {
     initialPriceRef.current = trade.price;
-  }, [trade.marketId]);
+    setLivePrice(null);
+    // Fetch real current price from provider API
+    const fetchLivePrice = async () => {
+      try {
+        const prov = (trade.provider || '').toLowerCase();
+        if (prov === 'kalshi') {
+          const ticker = (trade.marketId || '').replace(/^kalshi-/i, '');
+          const r = await fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${ticker}`);
+          if (r.ok) {
+            const d = await r.json();
+            const mk = d.market || d;
+            const raw = mk.yes_ask ?? mk.yes_bid ?? mk.last_price;
+            if (raw != null) {
+              const yp = Number(raw) <= 1 ? Number(raw) : Number(raw) / 100;
+              setLivePrice(yp);
+            }
+          }
+        } else {
+          const r = await fetch(
+            `https://gamma-api.polymarket.com/markets?condition_id=${trade.marketId}&limit=1`
+          );
+          if (r.ok) {
+            const d = await r.json();
+            const mk = Array.isArray(d) ? d[0] : d;
+            if (mk?.outcomePrices) {
+              const prices = JSON.parse(mk.outcomePrices);
+              const yp = parseFloat(prices[0]);
+              if (!isNaN(yp) && yp > 0 && yp < 1) {
+                setLivePrice(yp);
+              }
+            }
+          }
+        }
+      } catch {
+        // Live price unavailable — use trade price
+      }
+    };
+    fetchLivePrice();
+  }, [trade.marketId, trade.provider, trade.price]);
 
   // ── Candlestick data ──
   const candlestickData = useMemo(() => {
@@ -352,12 +391,15 @@ export default function ChartModal({
   }, [candlestickData]);
 
   // ── Derived values ──
-  // Normalize to YES price regardless of which side the original trade was on
-  const origSide = (trade.side || '').toLowerCase();
-  const derivedYesPrice = (origSide === 'no' || origSide === 'down') ? 1 - trade.price : trade.price;
-  const yesPrice = derivedYesPrice * 100;
-  const noPrice = (1 - derivedYesPrice) * 100;
-  const pricePerShare = tradeSide === 'yes' ? derivedYesPrice : 1 - derivedYesPrice;
+  // Use live price when available, fall back to trade execution price
+  const baseYesPrice = livePrice ?? (
+    (trade.side || '').toLowerCase() === 'no' || (trade.side || '').toLowerCase() === 'down'
+      ? 1 - trade.price
+      : trade.price
+  );
+  const yesPrice = baseYesPrice * 100;
+  const noPrice = (1 - baseYesPrice) * 100;
+  const pricePerShare = tradeSide === 'yes' ? baseYesPrice : 1 - baseYesPrice;
   const priceCents = tradeSide === 'yes' ? yesPrice : noPrice;
   const totalCost = tradeQuantity * pricePerShare;
   const potentialPayout = tradeQuantity * 1.0;
@@ -719,7 +761,7 @@ export default function ChartModal({
                         {
                           ...trade,
                           side: tradeSide === 'yes' ? 'Yes' : 'No',
-                          price: tradeSide === 'yes' ? derivedYesPrice : 1 - derivedYesPrice,
+                          price: tradeSide === 'yes' ? baseYesPrice : 1 - baseYesPrice,
                         },
                         tradeQuantity,
                       );
@@ -744,7 +786,7 @@ export default function ChartModal({
                       onInstantTrade({
                         ...trade,
                         side: tradeSide === 'yes' ? 'Yes' : 'No',
-                        price: tradeSide === 'yes' ? derivedYesPrice : 1 - derivedYesPrice,
+                        price: tradeSide === 'yes' ? baseYesPrice : 1 - baseYesPrice,
                       });
                     }}
                     className="w-full py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-400 font-bold text-xs flex items-center justify-center gap-2 hover:bg-amber-500/10 transition-all"
