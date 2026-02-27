@@ -114,6 +114,13 @@ interface MarketTick {
   timestamp: string;
 }
 
+const normalizeName = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 interface WalletProfile {
   address: string;
   totalPnl: number;
@@ -850,6 +857,18 @@ export default function TerminalPage() {
     }
     return true;
   }), [trades, liveSubTab, filterProvider, filterSide, filterMinNotional, filterPriceRange, filterCategory, filterWhaleOnly, filterSearch, filterTradeTier, filterFastOnly]);
+
+  // Fast lookup: provider+normalized name → latest MarketTick for current price
+  const marketTickIndex = useMemo(() => {
+    const map = new Map<string, MarketTick>();
+    for (const tick of marketTicks) {
+      const key = `${tick.provider}:${normalizeName(tick.name)}`;
+      if (!map.has(key)) {
+        map.set(key, tick);
+      }
+    }
+    return map;
+  }, [marketTicks]);
 
   // Count active filters for badge
   const activeFilterCount = useMemo(() => {
@@ -1824,12 +1843,21 @@ export default function TerminalPage() {
                         <span className="text-sm text-white truncate block">
                           {trade.marketName}
                         </span>
-                        <span className="text-[10px] text-slate-500 block">
-                          {trade.side} @ {trade.priceCents} · {trade.shares} shares · fee ${trade.fee.toFixed(2)}
-                          {trade.walletAddress && (
-                            <span className="ml-2 text-slate-600">{trade.walletAddress}</span>
-                          )}
-                        </span>
+                        {(() => {
+                          const key = `${trade.provider}:${normalizeName(trade.marketName)}`;
+                          const tick = marketTickIndex.get(key);
+                          const currentCents = tick ? `${(tick.price * 100).toFixed(1)}¢` : null;
+                          return (
+                            <span className="text-[10px] text-slate-500 block">
+                              Fill {trade.side} @ {trade.priceCents}
+                              {currentCents && <> · Now ~ {currentCents}</>}
+                              {' '}· {trade.shares} shares · fee ${trade.fee.toFixed(2)}
+                              {trade.walletAddress && (
+                                <span className="ml-2 text-slate-600">{trade.walletAddress}</span>
+                              )}
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       {/* Notional */}

@@ -392,8 +392,9 @@ export default function ChartModal({
 
   // ── Derived values ──
   // Use live price when available, fall back to trade execution price
+  const origSide = (trade.side || '').toLowerCase();
   const baseYesPrice = livePrice ?? (
-    (trade.side || '').toLowerCase() === 'no' || (trade.side || '').toLowerCase() === 'down'
+    origSide === 'no' || origSide === 'down'
       ? 1 - trade.price
       : trade.price
   );
@@ -473,11 +474,16 @@ export default function ChartModal({
             <div className="flex items-center gap-4 mr-2">
               <div className="text-center">
                 <div className="text-lg font-mono font-bold text-[#4FFFC8]">{yesPrice.toFixed(1)}¢</div>
-                <div className="text-[9px] text-slate-500 uppercase">Yes</div>
+                <div className="text-[9px] text-slate-500 uppercase">Yes (current)</div>
+                <div className="text-[9px] text-slate-600">
+                  Fill {(origSide === 'no' || origSide === 'down'
+                    ? (1 - trade.price) * 100
+                    : trade.price * 100).toFixed(1)}¢
+                </div>
               </div>
               <div className="text-center">
                 <div className="text-lg font-mono font-bold text-red-400">{noPrice.toFixed(1)}¢</div>
-                <div className="text-[9px] text-slate-500 uppercase">No</div>
+                <div className="text-[9px] text-slate-500 uppercase">No (current)</div>
               </div>
             </div>
 
