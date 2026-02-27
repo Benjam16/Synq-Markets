@@ -136,8 +136,11 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Calculate combined multiplier: Π(1/price)
-    const combinedMultiplier = legs.reduce((acc, leg) => acc * (1 / leg.price), 1);
+    // Calculate combined multiplier with 10% vig per leg
+    const combinedMultiplier = legs.reduce((acc, leg) => {
+      const adjustedPrice = leg.price + (1 - leg.price) * 0.10;
+      return acc * (1 / adjustedPrice);
+    }, 1);
     const potentialPayout = +(stake * combinedMultiplier).toFixed(2);
 
     // Set all legs as pending

@@ -42,12 +42,13 @@ export type Position = {
   id: string;
   marketId: string;
   marketName: string;
-  outcome?: string; // The specific outcome name (e.g., "Gavin Newsom")
+  outcome?: string;
   provider: "Polymarket" | "Kalshi";
   side: "YES" | "NO";
   entryPrice: number;
   currentPrice: number;
   quantity: number;
+  externalUrl?: string;
 };
 
 export type DashboardData = {

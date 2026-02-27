@@ -262,15 +262,21 @@ export async function GET(req: NextRequest) {
       tradesRes = { rows: [] };
     }
 
-    // OPTIMIZED: Use price cache first (fast), only fetch live markets for cache misses
+    // Trigger background price refresh (non-blocking) so cache stays warm
+    try {
+      fetch(`${req.nextUrl.origin}/api/cron/refresh-prices`).catch(() => {});
+    } catch {}
+
+    // Use price cache (kept fresh by /api/cron/refresh-prices)
     const priceMap = new Map<string, number>();
     const yesPriceMap = new Map<string, number>();
     const noPriceMap = new Map<string, number>();
     const marketNameMap = new Map<string, string>();
+    const externalUrlMap = new Map<string, string>();
     
     if (tradesRes.rows.length > 0) {
       try {
-        // STEP 1: Try price cache first (fast database query)
+        // STEP 1: Read fresh prices from cache
         const priceRows = await query<PriceRow>(
           `
           WITH keys AS (
@@ -286,38 +292,33 @@ export async function GET(req: NextRequest) {
           JOIN market_price_cache m
             ON m.provider = p.provider
            AND m.market_id = p.market_id
-           AND m.as_of > NOW() - INTERVAL '30 minutes'; -- Use cache up to 30 minutes old (faster, still reasonably fresh)
+           AND m.as_of > NOW() - INTERVAL '30 minutes';
           `,
           [tradesRes.rows.map((t: any) => `${t.provider}:${t.market_id}`)],
         );
         
-        // Build maps from cache
         const cachedKeys = new Set<string>();
         priceRows.rows.forEach((row: PriceRow) => {
           const key = `${row.provider}:${row.market_id}`;
           const price = Number(row.last_price ?? 0);
           priceMap.set(key, price);
-          yesPriceMap.set(key, price); // Assume YES price from cache
-          noPriceMap.set(key, 1 - price); // Calculate NO price
+          yesPriceMap.set(key, price);
+          noPriceMap.set(key, 1 - price);
           cachedKeys.add(key);
         });
         
-        // STEP 2: For cache misses, use entry price (fast, no API call needed)
-        // This is much faster than fetching all markets just to find a few prices
+        // STEP 2: For cache misses, use entry price as fallback
         tradesRes.rows.forEach((t: any) => {
           const key = `${t.provider}:${t.market_id}`;
           if (!cachedKeys.has(key)) {
-            // Use entry price for cache misses (good enough for dashboard, avoids 20+ second API call)
             const entryPrice = Number(t.price);
             priceMap.set(key, entryPrice);
             yesPriceMap.set(key, entryPrice);
             noPriceMap.set(key, 1 - entryPrice);
-            console.log(`[Dashboard] Using entry price for ${key} (not in cache)`);
           }
         });
       } catch (priceError: any) {
         console.error('[Dashboard] Error fetching prices from cache:', priceError);
-        // Fallback to entry price if cache query fails (database connection issue)
         tradesRes.rows.forEach((t: any) => {
           const key = `${t.provider}:${t.market_id}`;
           if (!priceMap.has(key)) {
@@ -327,6 +328,24 @@ export async function GET(req: NextRequest) {
             noPriceMap.set(key, 1 - entryPrice);
           }
         });
+      }
+
+      // STEP 3: Load external URLs from market_metadata
+      try {
+        const urlRows = await query<{ provider: string; market_id: string; external_url: string }>(
+          `SELECT provider, market_id, external_url FROM market_metadata
+           WHERE external_url IS NOT NULL AND external_url != ''
+             AND (provider, market_id) IN (SELECT unnest($1::text[]), unnest($2::text[]))`,
+          [
+            tradesRes.rows.map((t: any) => t.provider),
+            tradesRes.rows.map((t: any) => t.market_id),
+          ],
+        );
+        urlRows.rows.forEach((r) => {
+          externalUrlMap.set(`${r.provider}:${r.market_id}`, r.external_url);
+        });
+      } catch {
+        // external_url column may not exist yet — not critical
       }
     }
 
@@ -379,12 +398,13 @@ export async function GET(req: NextRequest) {
         id: `trade-${t.id}`,
         marketId: t.market_id,
         marketName: displayName,
-        outcome: outcomeName, // Store outcome for reference
+        outcome: outcomeName,
         provider: t.provider.toLowerCase() === "kalshi" ? "Kalshi" : "Polymarket",
         side: tradeSide as "YES" | "NO",
         entryPrice: Number(t.price),
         currentPrice,
         quantity: Number(t.quantity),
+        externalUrl: externalUrlMap.get(`${t.provider}:${t.market_id}`) || undefined,
       };
     });
 
@@ -439,6 +459,35 @@ export async function GET(req: NextRequest) {
     const phase = (subscription as any)?.phase || 'phase1';
     const profitSplitPct = Number((subscription as any)?.profit_split_pct || 0);
 
+    // Fetch parlays with enriched current prices for each leg
+    let parlaysWithPrices: any[] = [];
+    try {
+      const parlayRes = await query<{
+        id: number; stake: string; combined_multiplier: string;
+        potential_payout: string; status: string; legs: any;
+        placed_at: string; settled_at: string | null;
+      }>(
+        `SELECT id, stake, combined_multiplier, potential_payout, status, legs, placed_at, settled_at
+         FROM parlay_bets WHERE user_id = $1 ORDER BY placed_at DESC LIMIT 50`,
+        [userId],
+      );
+      parlaysWithPrices = parlayRes.rows.map((p) => {
+        const legs = typeof p.legs === 'string' ? JSON.parse(p.legs) : (p.legs || []);
+        const enrichedLegs = legs.map((leg: any) => {
+          const key = `${(leg.provider || '').toLowerCase()}:${leg.marketId}`;
+          const cachedYes = yesPriceMap.get(key);
+          const cachedNo = noPriceMap.get(key);
+          const currentPrice = leg.outcome === 'no'
+            ? (cachedNo ?? leg.price)
+            : (cachedYes ?? leg.price);
+          return { ...leg, currentPrice };
+        });
+        return { ...p, legs: enrichedLegs };
+      });
+    } catch {
+      // parlay_bets table may not exist
+    }
+
     const data: {
       currentEquity: number;
       cashBalance: number;
@@ -453,6 +502,7 @@ export async function GET(req: NextRequest) {
       unrealizedPnl?: number;
       phase?: string;
       profitSplitPct?: number;
+      parlays?: any[];
     } = {
       currentEquity,
       cashBalance,
@@ -471,6 +521,7 @@ export async function GET(req: NextRequest) {
       subscriptionId: subscription?.id || undefined,
       phase,
       profitSplitPct,
+      parlays: parlaysWithPrices,
     };
 
     return NextResponse.json(data, {

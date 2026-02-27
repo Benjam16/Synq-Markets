@@ -259,8 +259,10 @@ function DashboardContent() {
           if (data.phase) setPhase(data.phase);
           if (data.profitSplitPct !== undefined) setProfitSplitPct(data.profitSplitPct);
 
-          // Fetch parlays for the user
-          if (dbUserId) {
+          // Use parlays from dashboard API (includes live leg prices)
+          if (data.parlays) {
+            setParlays(data.parlays);
+          } else if (dbUserId) {
             fetch(`/api/parlay?userId=${dbUserId}`)
               .then(r => r.ok ? r.json() : { parlays: [] })
               .then(d => setParlays(d.parlays || []))
@@ -1786,18 +1788,15 @@ function DashboardContent() {
                         }
                       };
                       
-                      // Build external URL based on provider
+                      // Build external URL — prefer API-stored URL, then market data, then heuristic
                       const getExternalUrl = () => {
-                        // Kalshi markets
+                        if ((pos as any).externalUrl) return (pos as any).externalUrl;
                         if (pos.provider === 'Kalshi' || market?.provider === 'Kalshi') {
                           if ((market as any)?.kalshiUrl) return (market as any).kalshiUrl;
                           const ticker = market?.slug || market?.conditionId || pos.marketId.replace(/^kalshi-/i, '');
                           return `https://kalshi.com/markets/${ticker.toLowerCase()}`;
                         }
-                        // Polymarket markets
-                        if (market?.polymarketUrl) {
-                          return market.polymarketUrl;
-                        }
+                        if (market?.polymarketUrl) return market.polymarketUrl;
                         if (market) {
                           const slug = market.slug || market.id.replace(/^polymarket\./i, '').replace(/^polymarket:/i, '');
                           return `https://polymarket.com/event/${slug}`;
@@ -2088,25 +2087,34 @@ function DashboardContent() {
                           </button>
                           {isExpanded && (
                             <div className="border-t border-white/5 px-3 pb-3 pt-2 space-y-1.5">
-                              {legs.map((leg: any, i: number) => (
-                                <div key={i} className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className="text-[9px] text-slate-600 flex-shrink-0">#{i + 1}</span>
-                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase flex-shrink-0 ${
-                                      leg.outcome === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                                    }`}>{leg.outcome}</span>
-                                    <span className="text-[10px] text-slate-400 truncate">{leg.marketName}</span>
+                              {legs.map((leg: any, i: number) => {
+                                const legCurrentPrice = leg.currentPrice ?? leg.price;
+                                const priceChange = legCurrentPrice - leg.price;
+                                return (
+                                  <div key={i} className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="text-[9px] text-slate-600 flex-shrink-0">#{i + 1}</span>
+                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase flex-shrink-0 ${
+                                        leg.outcome === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                      }`}>{leg.outcome}</span>
+                                      <span className="text-[10px] text-slate-400 truncate">{leg.marketName}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                                      <span className="text-[10px] text-slate-500">${leg.price?.toFixed(2)}</span>
+                                      {legCurrentPrice !== leg.price && (
+                                        <span className={`text-[9px] font-bold ${priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                          {priceChange >= 0 ? '+' : ''}{(priceChange * 100).toFixed(1)}c
+                                        </span>
+                                      )}
+                                      {leg.status && leg.status !== 'pending' && (
+                                        <span className={`text-[9px] font-black ${leg.status === 'won' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                          {leg.status.toUpperCase()}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                                    <span className="text-[10px] text-slate-500">${leg.price?.toFixed(2)}</span>
-                                    {leg.status && leg.status !== 'pending' && (
-                                      <span className={`text-[9px] font-black ${leg.status === 'won' ? 'text-emerald-400' : 'text-red-400'}`}>
-                                        {leg.status.toUpperCase()}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                               <div className="pt-1 text-[9px] text-slate-600">
                                 Placed {new Date(parlay.placed_at).toLocaleDateString()}
                                 {parlay.settled_at && ` · Settled ${new Date(parlay.settled_at).toLocaleDateString()}`}

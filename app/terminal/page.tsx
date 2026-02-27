@@ -444,19 +444,26 @@ export default function TerminalPage() {
 
       const quantity = quantityOverride && quantityOverride > 0 ? quantityOverride : instantTradeShares;
 
+      // Build external URL for dashboard links
+      const providerLower = (market.provider || 'polymarket').toLowerCase();
+      const extUrl = providerLower === 'kalshi'
+        ? (market.kalshiUrl || `https://kalshi.com/markets/${(trade.marketId || '').replace(/^kalshi-/i, '').toLowerCase()}`)
+        : (market.polymarketUrl || (market.slug ? `https://polymarket.com/event/${market.slug}` : ''));
+
       const res = await fetch('/api/buy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
           marketId: market.id || market.conditionId,
-          provider: (market.provider || 'polymarket').toLowerCase(),
+          provider: providerLower,
           side,
           outcome: trade.side,
           price: trade.price,
           quantity,
           marketName: trade.marketName,
           category: ('category' in trade ? (trade as TerminalTrade).category : '') || 'General',
+          externalUrl: extUrl || undefined,
         }),
       });
 

@@ -259,20 +259,48 @@ export async function POST(req: NextRequest) {
 
     await client.query("COMMIT");
 
-    // Save market name to market_metadata so dashboard can display it
+    // Save market name + external URL to market_metadata so dashboard can display it
     const marketName = body.marketName ? String(body.marketName) : null;
+    const externalUrl = body.externalUrl ? String(body.externalUrl) : null;
     if (marketName) {
       try {
+        // Try with external_url column first
         await client.query(
-          `INSERT INTO market_metadata (provider, market_id, name, category)
-           VALUES ($1, $2, $3, $4)
+          `INSERT INTO market_metadata (provider, market_id, name, category, external_url)
+           VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (provider, market_id)
-           DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`,
-          [provider, marketId, marketName, body.category || 'General']
+           DO UPDATE SET name = EXCLUDED.name, updated_at = NOW(),
+              external_url = COALESCE(EXCLUDED.external_url, market_metadata.external_url)`,
+          [provider, marketId, marketName, body.category || 'General', externalUrl]
         );
-      } catch (metaErr) {
-        // Non-critical — don't fail the trade if metadata insert fails
-        console.warn('[Buy] Could not save market metadata:', metaErr);
+      } catch (metaErr: any) {
+        if (metaErr?.message?.includes('external_url') || metaErr?.code === '42703') {
+          // external_url column doesn't exist yet — auto-add it
+          try {
+            await client.query(`ALTER TABLE market_metadata ADD COLUMN IF NOT EXISTS external_url TEXT`);
+            await client.query(
+              `INSERT INTO market_metadata (provider, market_id, name, category, external_url)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (provider, market_id)
+               DO UPDATE SET name = EXCLUDED.name, updated_at = NOW(),
+                  external_url = COALESCE(EXCLUDED.external_url, market_metadata.external_url)`,
+              [provider, marketId, marketName, body.category || 'General', externalUrl]
+            );
+          } catch (alterErr) {
+            // Last resort: save without external_url
+            try {
+              await client.query(
+                `INSERT INTO market_metadata (provider, market_id, name, category)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (provider, market_id)
+                 DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()`,
+                [provider, marketId, marketName, body.category || 'General']
+              );
+            } catch {}
+          }
+        } else {
+          console.warn('[Buy] Could not save market metadata:', metaErr);
+        }
       }
     }
 

@@ -731,7 +731,11 @@ export default function MarketsPage() {
   // ── Parlay helpers ────────────────────────────────────────────────────
   const parlayMultiplier = useMemo(() => {
     if (parlayLegs.length === 0) return 1;
-    return parlayLegs.reduce((acc, l) => acc * (1 / l.price), 1);
+    // Apply 10% vig per leg to reduce payouts to more realistic levels
+    return parlayLegs.reduce((acc, l) => {
+      const adjustedPrice = l.price + (1 - l.price) * 0.10;
+      return acc * (1 / adjustedPrice);
+    }, 1);
   }, [parlayLegs]);
 
   const parlayPayout = useMemo(() => {
