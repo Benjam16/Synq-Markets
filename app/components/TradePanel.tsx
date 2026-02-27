@@ -694,14 +694,6 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
               )}
 
               <div className="p-4 md:p-8">
-                {/* Close Button — hidden on mobile (handled by sticky header above) */}
-                <button
-                  onClick={onClose}
-                  className="hidden md:flex absolute top-4 right-4 p-2 hover:bg-slate-800 rounded-lg transition-colors z-10"
-                >
-                  <X className="w-5 h-5 text-slate-400" strokeWidth={1.5} />
-                </button>
-
                 {/* Event Title and Market Selection */}
                 <div className="mb-6 md:mb-8">
                   <h2 className="hidden md:block text-3xl font-bold text-white mb-4 leading-tight">

@@ -20,23 +20,31 @@ export async function GET(req: NextRequest) {
     const userId = req.nextUrl.searchParams.get('userId');
     if (!userId) return NextResponse.json({ error: 'userId required' }, { status: 400 });
 
-    const res = await query<{
-      id: number;
-      stake: string;
-      combined_multiplier: string;
-      potential_payout: string;
-      status: string;
-      legs: ParlayLeg[];
-      placed_at: string;
-      settled_at: string | null;
-    }>(
-      `SELECT id, stake, combined_multiplier, potential_payout, status, legs, placed_at, settled_at
-       FROM parlay_bets
-       WHERE user_id = $1
-       ORDER BY placed_at DESC
-       LIMIT 50`,
-      [userId],
-    );
+    let res;
+    try {
+      res = await query<{
+        id: number;
+        stake: string;
+        combined_multiplier: string;
+        potential_payout: string;
+        status: string;
+        legs: ParlayLeg[];
+        placed_at: string;
+        settled_at: string | null;
+      }>(
+        `SELECT id, stake, combined_multiplier, potential_payout, status, legs, placed_at, settled_at
+         FROM parlay_bets
+         WHERE user_id = $1
+         ORDER BY placed_at DESC
+         LIMIT 50`,
+        [userId],
+      );
+    } catch (tableErr: any) {
+      if (tableErr?.message?.includes('parlay_bets') || tableErr?.code === '42P01') {
+        return NextResponse.json({ parlays: [] });
+      }
+      throw tableErr;
+    }
 
     return NextResponse.json({ parlays: res.rows });
   } catch (err) {
@@ -94,17 +102,26 @@ export async function POST(req: NextRequest) {
     }
 
     // Get active subscription for user
-    const subRes = await query<{
-      id: number;
-      current_balance: string;
-      phase: string;
-    }>(
-      `SELECT id, current_balance, COALESCE(phase, 'phase1') AS phase
-       FROM challenge_subscriptions
-       WHERE user_id = $1 AND status = 'active'
-       ORDER BY started_at DESC LIMIT 1`,
-      [userId],
-    );
+    let subRes;
+    try {
+      subRes = await query<{ id: number; current_balance: string; phase: string }>(
+        `SELECT id, current_balance, COALESCE(phase, 'phase1') AS phase
+         FROM challenge_subscriptions
+         WHERE user_id = $1 AND status = 'active'
+         ORDER BY started_at DESC LIMIT 1`,
+        [userId],
+      );
+    } catch (colErr: any) {
+      if (colErr?.message?.includes('column') || colErr?.code === '42703') {
+        subRes = await query<{ id: number; current_balance: string; phase: string }>(
+          `SELECT id, current_balance, 'phase1' AS phase
+           FROM challenge_subscriptions
+           WHERE user_id = $1 AND status = 'active'
+           ORDER BY started_at DESC LIMIT 1`,
+          [userId],
+        );
+      } else { throw colErr; }
+    }
 
     if (subRes.rows.length === 0) {
       return NextResponse.json({ error: 'No active challenge subscription found' }, { status: 400 });
@@ -137,6 +154,23 @@ export async function POST(req: NextRequest) {
          WHERE id = $2`,
         [stake, sub.id],
       );
+
+      // Ensure parlay_bets table exists (auto-migrate)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS parlay_bets (
+          id BIGSERIAL PRIMARY KEY,
+          user_id BIGINT NOT NULL REFERENCES users(id),
+          challenge_subscription_id BIGINT NOT NULL REFERENCES challenge_subscriptions(id),
+          stake NUMERIC(14,2) NOT NULL CHECK (stake > 0),
+          combined_multiplier NUMERIC(14,4) NOT NULL,
+          potential_payout NUMERIC(14,2) NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'won', 'lost', 'cancelled')),
+          legs JSONB NOT NULL,
+          placed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          settled_at TIMESTAMPTZ
+        );
+      `);
 
       // Insert parlay bet
       const insertRes = await client.query<{ id: number }>(
