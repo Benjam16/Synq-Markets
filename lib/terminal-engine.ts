@@ -607,8 +607,11 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         || t.title || t.question
         || (tradeSlug ? tradeSlug.replace(/-/g, ' ') : '')
         || `Market ${conditionId?.slice(0, 8) || idx}`;
+      // Only use slug-based URLs (condition IDs in URLs cause Polymarket 404s)
       const externalUrl = resolvedInfo?.externalUrl
-        || (tradeSlug ? `https://polymarket.com/event/${tradeSlug}` : `https://polymarket.com`);
+        || (tradeSlug && !tradeSlug.startsWith('0x') && tradeSlug.length > 5
+            ? `https://polymarket.com/event/${tradeSlug}`
+            : 'https://polymarket.com');
 
       return {
         id: `poly-${t.id || `${Date.now()}-${idx}`}`,

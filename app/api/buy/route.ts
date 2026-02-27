@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getClient } from "@/lib/db";
 import { getMarketPriceFast } from "@/lib/fast-price-lookup";
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const userId = Number(body.userId);
@@ -39,14 +41,23 @@ export async function POST(req: NextRequest) {
   try {
     await client.query("BEGIN");
 
-    // Price resolution: trust the frontend-provided price first (user sees the
-    // real live price on screen).  Fall back to cache/API only when needed.
+    // Price resolution: ALWAYS trust the frontend-provided price (user sees the
+    // real live price on screen).  Fall back to cache/API only when absolutely needed.
     let currentPrice = 0;
-    const frontendPrice = body.price != null ? Number(body.price) : NaN;
+    const rawPrice = body.price;
+    const frontendPrice = (rawPrice !== undefined && rawPrice !== null)
+      ? Number(rawPrice)
+      : NaN;
+
+    console.log(`[Buy v3] Raw body.price=${JSON.stringify(rawPrice)} → frontendPrice=${frontendPrice} for ${provider}:${marketId}`);
 
     if (!isNaN(frontendPrice) && frontendPrice > 0 && frontendPrice < 1) {
       currentPrice = frontendPrice;
-      console.log(`[Buy] Using frontend price for ${provider}:${marketId}: ${currentPrice}`);
+      console.log(`[Buy v3] ✓ Using frontend price: ${currentPrice}`);
+    } else if (!isNaN(frontendPrice) && frontendPrice >= 1 && frontendPrice <= 100) {
+      // Price sent in cents (1-100) instead of dollars (0-1)
+      currentPrice = frontendPrice / 100;
+      console.log(`[Buy v3] ✓ Price was in cents, converted: ${frontendPrice} → ${currentPrice}`);
     } else {
       try {
         const priceResult = await getMarketPriceFast(
@@ -355,6 +366,8 @@ export async function POST(req: NextRequest) {
       trade: tradeRes.rows[0],
       cost,
       subscriptionId: subscription.id,
+      priceUsed: currentPrice,
+      priceReceived: rawPrice,
       message: 'Trade executed successfully',
     });
   } catch (error: any) {

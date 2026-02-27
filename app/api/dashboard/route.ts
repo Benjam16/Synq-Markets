@@ -4,6 +4,8 @@ import { query } from "@/lib/db";
 import { Position, Tier } from "@/lib/types";
 import { fetchAllMarkets } from "@/lib/market-fetchers";
 
+export const dynamic = 'force-dynamic';
+
 type TradeRow = {
   id: number;
   market_id: string;

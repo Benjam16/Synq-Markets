@@ -446,13 +446,25 @@ export default function TerminalPage() {
 
       // Build external URL for dashboard links
       const providerLower = (market.provider || 'polymarket').toLowerCase();
-      const extUrl = providerLower === 'kalshi'
-        ? (market.kalshiUrl || (() => {
-            const raw = (trade.marketId || '').replace(/^kalshi-/i, '');
-            const seriesPart = raw.split('-')[0].toLowerCase();
-            return `https://kalshi.com/markets/${seriesPart}`;
-          })())
-        : (market.polymarketUrl || (market.slug ? `https://polymarket.com/event/${market.slug}` : ''));
+      let extUrl = '';
+      if (providerLower === 'kalshi') {
+        extUrl = market.kalshiUrl || (() => {
+          const raw = (trade.marketId || '').replace(/^kalshi-/i, '');
+          const seriesPart = raw.split('-')[0].toLowerCase();
+          return seriesPart.length > 2 ? `https://kalshi.com/markets/${seriesPart}` : 'https://kalshi.com/markets';
+        })();
+      } else {
+        // Polymarket: only use slug-based URLs (condition IDs cause 404)
+        if (market.polymarketUrl) {
+          extUrl = market.polymarketUrl;
+        } else if (market.slug && !market.slug.startsWith('0x') && market.slug.length > 5) {
+          extUrl = `https://polymarket.com/event/${market.slug}`;
+        } else if (trade.externalUrl && !trade.externalUrl.includes('/event/0x')) {
+          extUrl = trade.externalUrl;
+        } else {
+          extUrl = 'https://polymarket.com';
+        }
+      }
 
       const res = await fetch('/api/buy', {
         method: 'POST',
@@ -472,6 +484,15 @@ export default function TerminalPage() {
       });
 
       const data = await res.json();
+
+      // Debug: verify the API used the correct price
+      console.log('[InstantTrade] Response:', {
+        priceSent: trade.price,
+        priceUsed: data.priceUsed,
+        priceReceived: data.priceReceived,
+        cost: data.cost,
+        success: data.success,
+      });
 
       if (res.ok && !data.error) {
         setInstantTradeSuccess(tradeId);

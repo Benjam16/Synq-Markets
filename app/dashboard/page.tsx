@@ -1788,23 +1788,28 @@ function DashboardContent() {
                         }
                       };
                       
-                      // Build external URL — prefer API-stored URL, then market data, then heuristic
+                      // Build external URL — prefer API-stored URL, then market data, then safe fallback
                       const getExternalUrl = () => {
+                        // 1. Stored URL from market_metadata (most reliable)
                         if ((pos as any).externalUrl) return (pos as any).externalUrl;
+
                         if (pos.provider === 'Kalshi' || market?.provider === 'Kalshi') {
                           if ((market as any)?.kalshiUrl) return (market as any).kalshiUrl;
-                          // Kalshi URLs use series_ticker only (e.g. /markets/kxeth)
+                          // Use series_ticker prefix for Kalshi (e.g. /markets/kxeth)
                           const raw = market?.slug || market?.conditionId || pos.marketId.replace(/^kalshi-/i, '');
                           const seriesPart = raw.split('-')[0].toLowerCase();
-                          return `https://kalshi.com/markets/${seriesPart}`;
+                          if (seriesPart && seriesPart.length > 2) {
+                            return `https://kalshi.com/markets/${seriesPart}`;
+                          }
+                          return 'https://kalshi.com/markets';
                         }
+
+                        // Polymarket: only use slug-based URLs (condition IDs cause 404)
                         if (market?.polymarketUrl) return market.polymarketUrl;
-                        if (market) {
-                          const slug = market.slug || market.id.replace(/^polymarket\./i, '').replace(/^polymarket:/i, '');
-                          return `https://polymarket.com/event/${slug}`;
+                        if (market?.slug && !market.slug.startsWith('0x') && market.slug.length > 5) {
+                          return `https://polymarket.com/event/${market.slug}`;
                         }
-                        const cleanId = pos.marketId.replace(/^polymarket\./i, '').replace(/^polymarket:/i, '');
-                        return `https://polymarket.com/event/${cleanId}`;
+                        return 'https://polymarket.com';
                       };
                       
                       const polymarketUrl = getExternalUrl();
@@ -2045,8 +2050,8 @@ function DashboardContent() {
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                    {parlays.map((parlay: any) => {
-                      const isExpanded = parlaysExpanded.has(parlay.id);
+                    {parlays.map((parlay: any, parlayIdx: number) => {
+                      const isExpanded = parlaysExpanded.has(parlay.id) || parlayIdx === 0;
                       const statusColors: Record<string, string> = {
                         pending: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
                         won: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
@@ -2074,28 +2079,45 @@ function DashboardContent() {
                               else next.add(parlay.id);
                               return next;
                             })}
-                            className="w-full flex items-center justify-between p-3 hover:bg-white/[0.02] transition-colors text-left"
+                            className="w-full p-3 hover:bg-white/[0.02] transition-colors text-left space-y-2"
                           >
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${statusColors[parlay.status] || statusColors.pending}`}>
-                                {(parlay.status || 'PENDING').toUpperCase()}
-                              </span>
-                              <span className="text-[11px] text-slate-300 font-medium">
-                                {legs.length} legs · {Number(parlay.combined_multiplier).toFixed(2)}x
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="text-right">
-                                <div className="text-[10px] text-slate-500">stake</div>
-                                <div className="text-[11px] font-bold text-white">${Number(parlay.stake).toFixed(2)}</div>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${statusColors[parlay.status] || statusColors.pending}`}>
+                                  {(parlay.status || 'PENDING').toUpperCase()}
+                                </span>
+                                <span className="text-[11px] text-slate-300 font-medium">
+                                  {legs.length} legs · {Number(parlay.combined_multiplier).toFixed(2)}x
+                                </span>
                               </div>
-                              <div className="text-right">
-                                <div className="text-[10px] text-slate-500">payout</div>
-                                <div className={`text-[11px] font-bold ${parlay.status === 'won' ? 'text-emerald-400' : 'text-violet-300'}`}>
-                                  ${Number(parlay.potential_payout).toFixed(2)}
+                              <div className="flex items-center gap-3">
+                                <div className="text-right">
+                                  <div className="text-[10px] text-slate-500">stake</div>
+                                  <div className="text-[11px] font-bold text-white">${Number(parlay.stake).toFixed(2)}</div>
                                 </div>
+                                <div className="text-right">
+                                  <div className="text-[10px] text-slate-500">payout</div>
+                                  <div className={`text-[11px] font-bold ${parlay.status === 'won' ? 'text-emerald-400' : 'text-violet-300'}`}>
+                                    ${Number(parlay.potential_payout).toFixed(2)}
+                                  </div>
+                                </div>
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-500" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-500" />}
                               </div>
-                              {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-500" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-500" />}
+                            </div>
+                            {/* Win probability bar — always visible */}
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all duration-500"
+                                  style={{
+                                    width: `${Math.min(100, Math.max(1, winPct))}%`,
+                                    backgroundColor: winPct >= 50 ? '#4FFFC8' : winPct >= 20 ? '#f59e0b' : '#ef4444',
+                                  }}
+                                />
+                              </div>
+                              <span className={`text-[10px] font-black font-mono flex-shrink-0 ${winPct >= 50 ? 'text-emerald-400' : winPct >= 20 ? 'text-amber-400' : 'text-red-400'}`}>
+                                {winPct < 0.1 ? '<0.1' : winPct.toFixed(1)}%
+                              </span>
                             </div>
                           </button>
                           {isExpanded && (
