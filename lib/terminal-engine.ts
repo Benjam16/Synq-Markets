@@ -1094,7 +1094,17 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
   // ── Tier-stratified assembly: 100 low ($0-$250) + 100 medium ($251-$3K) + 100 high ($3K+) ──
   const PER_TIER = 100;
   const baseTs = Date.now();
-  const combined = [...polyTrades, ...kalshiTrades];
+  const FIVE_MIN = 5 * 60 * 1000;
+  const combinedAll = [...polyTrades, ...kalshiTrades];
+
+  // Keep only trades from the last 5 minutes and sort newest → oldest
+  const nowTs = Date.now();
+  const combined = combinedAll
+    .filter(t => {
+      const ts = Date.parse(t.timestamp);
+      return !Number.isNaN(ts) && (nowTs - ts) <= FIVE_MIN;
+    })
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
   const realLow  = combined.filter(t => t.notional <= 250);
   const realMid  = combined.filter(t => t.notional > 250 && t.notional <= 3000);
@@ -1140,20 +1150,20 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     ...realMid.slice(0, PER_TIER),  ...synMid,
     ...realHigh.slice(0, PER_TIER), ...synHigh,
     ...synFast,
-  ];
-
-  // Fisher-Yates shuffle so tiers don't appear as blocks
-  for (let i = allTrades.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [allTrades[i], allTrades[j]] = [allTrades[j], allTrades[i]];
-  }
+  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
   console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi → low:${realLow.length}+${synLow.length} mid:${realMid.length}+${synMid.length} high:${realHigh.length}+${synHigh.length} fast:${synFast.length} = ${allTrades.length}`);
 
-  // Update caches
+  // Update caches (only keep trades from last 5 minutes, newest first)
   const existingIds = new Set(tradeCache.map(t => t.id));
   const newTrades = allTrades.filter(t => !existingIds.has(t.id));
 
-  tradeCache = [...newTrades, ...tradeCache].slice(0, TRADE_CACHE_MAX);
+  tradeCache = [...newTrades, ...tradeCache]
+    .filter(t => {
+      const ts = Date.parse(t.timestamp);
+      return !Number.isNaN(ts) && (nowTs - ts) <= FIVE_MIN;
+    })
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, TRADE_CACHE_MAX);
   totalTradeCount += newTrades.length;
   totalVolume += newTrades.reduce((sum, t) => sum + t.notional, 0);
 
