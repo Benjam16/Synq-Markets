@@ -248,16 +248,14 @@ function DashboardContent() {
           
           setHasActiveChallenge(true);
           setPositions(data.positions || []);
-          setCurrentEquity(data.currentEquity || 0);
-          setCashBalance(data.cashBalance || 0);
-          setDayStartBalance(data.dayStartBalance || 0);
+          setCurrentEquity(data.currentEquity ?? 0);
+          setCashBalance(data.cashBalance ?? 0);
+          setDayStartBalance(data.dayStartBalance ?? 0);
           
-          // Set start balance from initialBalance if available
           if (data.initialBalance) {
             setStartBalance(data.initialBalance);
           }
-
-          // Set phase info
+          if (data.accountStatus) setAccountStatus(data.accountStatus);
           if (data.phase) setPhase(data.phase);
           if (data.profitSplitPct !== undefined) setProfitSplitPct(data.profitSplitPct);
 
@@ -646,14 +644,15 @@ function DashboardContent() {
           }
         }
         
-        // Check if user has an active challenge FIRST, before processing data
-        // If accountStatus is 'failed' or 'closed', or if there's no subscriptionId, there's no active challenge
-        const hasActive = data.accountStatus === 'active' && data.subscriptionId;
+        // Normalize accountStatus to handle case/whitespace
+        const normalizedPollStatus = data.accountStatus
+          ? String(data.accountStatus).trim().toLowerCase()
+          : 'inactive';
+        const hasActive = normalizedPollStatus === 'active' && data.subscriptionId;
         
         if (!hasActive) {
           setHasActiveChallenge(false);
           setLoading(false);
-          // Reset all values when no active challenge
           setCurrentEquity(0);
           setCashBalance(0);
           setDayStartBalance(0);
@@ -661,23 +660,24 @@ function DashboardContent() {
           setPositions([]);
           setUnrealizedPnl(0);
           setRealizedPnl(0);
-          return; // Don't continue processing if no active challenge
+          return;
         }
         
-        // We have an active challenge - set state and continue
         setHasActiveChallenge(true);
         setLoading(false);
         
         setPositions(data.positions || []);
         setTiers(data.tiers || []);
-        setCurrentEquity(data.currentEquity || 0);
-        setCashBalance(data.cashBalance || 0);
-        setDayStartBalance(data.dayStartBalance || 0);
+        setCurrentEquity(data.currentEquity ?? 0);
+        setCashBalance(data.cashBalance ?? 0);
+        setDayStartBalance(data.dayStartBalance ?? 0);
         
-        // Set start balance from initialBalance if available
         if (data.initialBalance) {
           setStartBalance(data.initialBalance);
         }
+        if (data.phase) setPhase(data.phase);
+        if (data.profitSplitPct !== undefined) setProfitSplitPct(data.profitSplitPct);
+        if (data.accountStatus) setAccountStatus(data.accountStatus);
         
         // Use unrealized P&L from API (which uses live prices) or calculate from positions
         if (data.unrealizedPnl !== undefined) {

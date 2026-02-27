@@ -48,14 +48,14 @@ export async function GET(req: NextRequest) {
           cs.current_balance, 
           cs.day_start_balance,
           cs.start_balance,
-          cs.status,
+          LOWER(TRIM(cs.status)) AS status,
           cs.fail_reason,
           COALESCE(cs.phase, 'phase1') AS phase,
           COALESCE(cs.profit_split_pct, 0) AS profit_split_pct
         FROM challenge_subscriptions cs
         WHERE cs.user_id = $1
         ORDER BY 
-          CASE WHEN cs.status = 'active' THEN 0 ELSE 1 END,
+          CASE WHEN LOWER(TRIM(cs.status)) = 'active' THEN 0 ELSE 1 END,
           cs.started_at DESC
         LIMIT 1;
         `,

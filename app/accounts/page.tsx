@@ -74,11 +74,12 @@ export default function AccountsPage() {
           if (createRes.ok) {
             const { userId } = await createRes.json();
             setDbUserId(userId);
+          } else {
+            setLoading(false);
           }
         }
       } catch (error) {
         console.error('Failed to setup user:', error);
-      } finally {
         setLoading(false);
       }
     };
@@ -251,9 +252,8 @@ export default function AccountsPage() {
     );
   }
 
-  // Only show "No Active Challenge" if we've confirmed there's no active challenge (hasActiveChallenge === false)
-  // Don't show it if we're still loading (hasActiveChallenge === null) or if we have an active challenge (hasActiveChallenge === true)
-  if (hasActiveChallenge === false || (!loading && !dashboard)) {
+  // Only show "No Active Challenge" after the API explicitly confirmed no active challenge
+  if (hasActiveChallenge === false) {
     return (
       <div className="min-h-screen bg-[#050505] flex items-center justify-center px-8">
         <motion.div
