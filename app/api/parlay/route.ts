@@ -136,9 +136,9 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Calculate combined multiplier with 10% vig per leg
+    // Calculate combined multiplier with house edge (40% vig per leg to prevent outsized payouts)
     const combinedMultiplier = legs.reduce((acc, leg) => {
-      const adjustedPrice = leg.price + (1 - leg.price) * 0.10;
+      const adjustedPrice = leg.price + (1 - leg.price) * 0.40;
       return acc * (1 / adjustedPrice);
     }, 1);
     const potentialPayout = +(stake * combinedMultiplier).toFixed(2);

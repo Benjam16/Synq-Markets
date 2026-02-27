@@ -352,12 +352,15 @@ export default function ChartModal({
   }, [candlestickData]);
 
   // ── Derived values ──
-  const yesPrice = trade.price * 100;
-  const noPrice = (1 - trade.price) * 100;
-  const pricePerShare = tradeSide === 'yes' ? trade.price : 1 - trade.price;
+  // Normalize to YES price regardless of which side the original trade was on
+  const origSide = (trade.side || '').toLowerCase();
+  const derivedYesPrice = (origSide === 'no' || origSide === 'down') ? 1 - trade.price : trade.price;
+  const yesPrice = derivedYesPrice * 100;
+  const noPrice = (1 - derivedYesPrice) * 100;
+  const pricePerShare = tradeSide === 'yes' ? derivedYesPrice : 1 - derivedYesPrice;
   const priceCents = tradeSide === 'yes' ? yesPrice : noPrice;
   const totalCost = tradeQuantity * pricePerShare;
-  const potentialPayout = tradeQuantity * 1.0; // each share pays $1 if correct
+  const potentialPayout = tradeQuantity * 1.0;
   const potentialProfit = potentialPayout - totalCost;
 
   const maxBookSize = Math.max(
@@ -716,7 +719,7 @@ export default function ChartModal({
                         {
                           ...trade,
                           side: tradeSide === 'yes' ? 'Yes' : 'No',
-                          price: tradeSide === 'yes' ? trade.price : 1 - trade.price,
+                          price: tradeSide === 'yes' ? derivedYesPrice : 1 - derivedYesPrice,
                         },
                         tradeQuantity,
                       );
@@ -741,7 +744,7 @@ export default function ChartModal({
                       onInstantTrade({
                         ...trade,
                         side: tradeSide === 'yes' ? 'Yes' : 'No',
-                        price: tradeSide === 'yes' ? trade.price : 1 - trade.price,
+                        price: tradeSide === 'yes' ? derivedYesPrice : 1 - derivedYesPrice,
                       });
                     }}
                     className="w-full py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-400 font-bold text-xs flex items-center justify-center gap-2 hover:bg-amber-500/10 transition-all"

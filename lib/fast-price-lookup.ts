@@ -130,13 +130,64 @@ export async function getMarketPriceFast(
     console.error('[Fast Price] API fetch failed:', error);
   }
 
-  // STEP 4: Last resort - return 0.5 (neutral price) if everything fails
-  // This should rarely happen, but prevents trade execution from failing
-  console.warn(`[Fast Price] All lookups failed for ${provider}:${marketId}, using fallback`);
+  // STEP 4: Direct single-market API fetch (more reliable than fetchAllMarkets for unknown markets)
+  try {
+    if (normalizedProvider === 'kalshi') {
+      const cleanTicker = marketId.replace(/^kalshi-/i, '');
+      const res = await fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${cleanTicker}`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const m = data.market || data;
+        const raw = m.yes_ask ?? m.yes_bid ?? m.last_price;
+        if (raw != null) {
+          const yp = Number(raw) <= 1 ? Number(raw) : Number(raw) / 100;
+          const np = 1 - yp;
+          query(
+            `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT (provider, market_id) DO UPDATE SET last_price = EXCLUDED.last_price, as_of = EXCLUDED.as_of;`,
+            [normalizedProvider, marketId, yp.toString()]
+          ).catch(() => {});
+          return { price: side === 'no' ? np : yp, yesPrice: yp, noPrice: np, source: 'api' };
+        }
+      }
+    } else {
+      // Polymarket: try Gamma API by condition_id
+      const res = await fetch(
+        `https://gamma-api.polymarket.com/markets?condition_id=${marketId}&limit=1`,
+        { signal: AbortSignal.timeout(5000) },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const m = Array.isArray(data) ? data[0] : data;
+        if (m?.outcomePrices) {
+          const prices = JSON.parse(m.outcomePrices);
+          const yp = parseFloat(prices[0]);
+          if (!isNaN(yp) && yp > 0 && yp < 1) {
+            const np = 1 - yp;
+            query(
+              `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
+               VALUES ($1, $2, $3, NOW())
+               ON CONFLICT (provider, market_id) DO UPDATE SET last_price = EXCLUDED.last_price, as_of = EXCLUDED.as_of;`,
+              [normalizedProvider, marketId, yp.toString()]
+            ).catch(() => {});
+            return { price: side === 'no' ? np : yp, yesPrice: yp, noPrice: np, source: 'api' };
+          }
+        }
+      }
+    }
+  } catch {
+    // Direct API also failed
+  }
+
+  // STEP 5: Last resort - return 0.5 if everything fails
+  console.warn(`[Fast Price] All lookups failed for ${normalizedProvider}:${marketId}, using 0.50 fallback`);
   return {
     price: 0.5,
     yesPrice: 0.5,
     noPrice: 0.5,
-    source: 'entry', // Mark as entry to indicate it's a fallback
+    source: 'entry',
   };
 }

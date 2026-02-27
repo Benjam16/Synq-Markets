@@ -2044,7 +2044,7 @@ function DashboardContent() {
                     <p className="text-slate-600 text-[11px] mt-1">Use Multi-Bet mode in the Markets tab</p>
                   </div>
                 ) : (
-                  <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                  <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
                     {parlays.map((parlay: any) => {
                       const isExpanded = parlaysExpanded.has(parlay.id);
                       const statusColors: Record<string, string> = {
@@ -2054,6 +2054,17 @@ function DashboardContent() {
                         cancelled: 'text-slate-400 bg-slate-500/10 border-slate-500/20',
                       };
                       const legs: any[] = parlay.legs || [];
+
+                      // Win probability = product of each leg's current implied probability
+                      const winProbability = legs.reduce((acc: number, leg: any) => {
+                        const cp = leg.currentPrice ?? leg.price ?? 0.5;
+                        const legProb = leg.outcome === 'yes' ? cp : 1 - cp;
+                        return acc * Math.max(0.01, Math.min(0.99, legProb));
+                      }, 1);
+                      const winPct = (winProbability * 100);
+                      const legsWon = legs.filter((l: any) => l.status === 'won').length;
+                      const legsLost = legs.filter((l: any) => l.status === 'lost').length;
+
                       return (
                         <div key={parlay.id} className="rounded-xl border border-white/5 overflow-hidden">
                           <button
@@ -2088,35 +2099,80 @@ function DashboardContent() {
                             </div>
                           </button>
                           {isExpanded && (
-                            <div className="border-t border-white/5 px-3 pb-3 pt-2 space-y-1.5">
-                              {legs.map((leg: any, i: number) => {
-                                const legCurrentPrice = leg.currentPrice ?? leg.price;
-                                const priceChange = legCurrentPrice - leg.price;
-                                return (
-                                  <div key={i} className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span className="text-[9px] text-slate-600 flex-shrink-0">#{i + 1}</span>
-                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase flex-shrink-0 ${
-                                        leg.outcome === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                                      }`}>{leg.outcome}</span>
-                                      <span className="text-[10px] text-slate-400 truncate">{leg.marketName}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                                      <span className="text-[10px] text-slate-500">${leg.price?.toFixed(2)}</span>
-                                      {legCurrentPrice !== leg.price && (
-                                        <span className={`text-[9px] font-bold ${priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                          {priceChange >= 0 ? '+' : ''}{(priceChange * 100).toFixed(1)}c
-                                        </span>
-                                      )}
-                                      {leg.status && leg.status !== 'pending' && (
-                                        <span className={`text-[9px] font-black ${leg.status === 'won' ? 'text-emerald-400' : 'text-red-400'}`}>
-                                          {leg.status.toUpperCase()}
-                                        </span>
-                                      )}
-                                    </div>
+                            <div className="border-t border-white/5 px-3 pb-3 pt-2 space-y-2">
+                              {/* Odds Tracker */}
+                              <div className="p-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Win Probability</span>
+                                  <span className={`text-[11px] font-black font-mono ${winPct >= 50 ? 'text-emerald-400' : winPct >= 20 ? 'text-amber-400' : 'text-red-400'}`}>
+                                    {winPct < 0.1 ? '<0.1' : winPct.toFixed(1)}%
+                                  </span>
+                                </div>
+                                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full transition-all duration-500"
+                                    style={{
+                                      width: `${Math.min(100, Math.max(1, winPct))}%`,
+                                      backgroundColor: winPct >= 50 ? '#4FFFC8' : winPct >= 20 ? '#f59e0b' : '#ef4444',
+                                    }}
+                                  />
+                                </div>
+                                {(legsWon > 0 || legsLost > 0) && (
+                                  <div className="flex gap-3 mt-1.5">
+                                    {legsWon > 0 && <span className="text-[9px] text-emerald-400">{legsWon} won</span>}
+                                    {legsLost > 0 && <span className="text-[9px] text-red-400">{legsLost} lost</span>}
+                                    <span className="text-[9px] text-slate-500">{legs.length - legsWon - legsLost} pending</span>
                                   </div>
-                                );
-                              })}
+                                )}
+                              </div>
+
+                              {/* Individual Legs */}
+                              <div className="space-y-1">
+                                {legs.map((leg: any, i: number) => {
+                                  const legCurrentPrice = leg.currentPrice ?? leg.price;
+                                  const priceChange = legCurrentPrice - leg.price;
+                                  const legProb = leg.outcome === 'yes' ? legCurrentPrice : 1 - legCurrentPrice;
+                                  const legProbPct = (legProb * 100);
+                                  return (
+                                    <div key={i} className="p-1.5 rounded-lg hover:bg-white/[0.02] transition-colors">
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className="text-[9px] text-slate-600 flex-shrink-0">#{i + 1}</span>
+                                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase flex-shrink-0 ${
+                                            leg.outcome === 'yes' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                          }`}>{leg.outcome}</span>
+                                          <span className="text-[10px] text-slate-400 truncate">{leg.marketName}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                                          {leg.status && leg.status !== 'pending' ? (
+                                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
+                                              leg.status === 'won' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                            }`}>
+                                              {leg.status.toUpperCase()}
+                                            </span>
+                                          ) : (
+                                            <span className={`text-[9px] font-mono font-bold ${legProbPct >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                              {legProbPct.toFixed(0)}%
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {/* Leg price tracker */}
+                                      <div className="flex items-center gap-3 mt-1 ml-6">
+                                        <span className="text-[9px] text-slate-600">Entry {(leg.price * 100).toFixed(1)}¢</span>
+                                        <span className="text-[9px] text-slate-500">→</span>
+                                        <span className="text-[9px] text-white font-mono">{(legCurrentPrice * 100).toFixed(1)}¢</span>
+                                        {priceChange !== 0 && (
+                                          <span className={`text-[9px] font-bold ${priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                            {priceChange >= 0 ? '+' : ''}{(priceChange * 100).toFixed(1)}¢
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
                               <div className="pt-1 text-[9px] text-slate-600">
                                 Placed {new Date(parlay.placed_at).toLocaleDateString()}
                                 {parlay.settled_at && ` · Settled ${new Date(parlay.settled_at).toLocaleDateString()}`}

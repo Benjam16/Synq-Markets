@@ -683,11 +683,15 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
     const realTrades = trades
       .filter((t: any) => {
         const ticker = (t.ticker || t.market_ticker || '').toUpperCase();
-        // Filter out all sports/per-game tickers
         return !isKalshiSportsTicker(ticker);
       })
       .map((t: any, idx: number) => {
-        const price = (t.yes_price || t.no_price || t.price || 50) / 100;
+        const tradeSide = (t.side || 'yes').toLowerCase();
+        // Use side-specific price: NO trades use no_price, YES trades use yes_price
+        const yesRaw = t.yes_price ?? t.price ?? 50;
+        const price = tradeSide === 'no'
+          ? (t.no_price ?? (100 - yesRaw)) / 100
+          : yesRaw / 100;
         const shares = t.count || t.size || 1;
         const notional = price * shares;
         const ticker = t.ticker || t.market_ticker || '';
@@ -696,7 +700,6 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           || t.market_title || t.title || '';
         const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
 
-        // Detect fast market trades by ticker prefix even if not in map
         const FAST_PREFIXES = ['KXBTC', 'KXETH', 'KXSOL', 'KXXRP', 'KXDOGE', 'KXAVAX', 'KXLINK', 'KXBNB'];
         const tickerUpper = ticker.toUpperCase();
         const isFastTicker = FAST_PREFIXES.some(p => tickerUpper.startsWith(p));
@@ -708,7 +711,7 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           type: (t.action || 'FILL').toUpperCase() as TerminalTrade['type'],
           marketId: ticker || `kalshi-${idx}`,
           marketName: resolvedName,
-          side: (t.side || 'yes').toLowerCase() === 'yes' ? 'Yes' : 'No',
+          side: tradeSide === 'yes' ? 'Yes' : 'No',
           price,
           priceCents: `${(price * 100).toFixed(1)}¢`,
           shares,

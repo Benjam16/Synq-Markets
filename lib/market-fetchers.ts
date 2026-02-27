@@ -4,7 +4,7 @@ export interface MarketOutcome {
   id: string;
   name: string;
   price: number; 
-  tokenId?: string;
+  tokenId?: string; 
   settled?: boolean;
   settledResult?: string;
 }
@@ -1161,7 +1161,7 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
   } catch (error) {
     console.error(`[Kalshi] Error fetching markets:`, error);
     if (error instanceof Error) console.error(`[Kalshi] ${error.message}`);
-    return [];
+    return []; 
   }
 }
 
