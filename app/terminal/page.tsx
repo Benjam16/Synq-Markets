@@ -422,7 +422,7 @@ export default function TerminalPage() {
   // ══════════════════════════════════════════════════════════════════════════
   // INSTANT TRADE — executes immediately, no confirmation
   // ══════════════════════════════════════════════════════════════════════════
-  const executeInstantTrade = useCallback(async (trade: TerminalTrade | WhaleAlert) => {
+  const executeInstantTrade = useCallback(async (trade: TerminalTrade | WhaleAlert, quantityOverride?: number) => {
     if (!user) {
       toast.error('Please sign in to trade');
       return;
@@ -442,6 +442,8 @@ export default function TerminalPage() {
       const side = (trade.side === 'Yes' || trade.side === 'Up') ? 'yes' : 'no';
       const market = buildMarketFromTrade(trade);
 
+      const quantity = quantityOverride && quantityOverride > 0 ? quantityOverride : instantTradeShares;
+
       const res = await fetch('/api/buy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -452,7 +454,7 @@ export default function TerminalPage() {
           side,
           outcome: trade.side,
           price: trade.price,
-          quantity: instantTradeShares,
+          quantity,
           marketName: trade.marketName,
           category: ('category' in trade ? (trade as TerminalTrade).category : '') || 'General',
         }),
@@ -467,7 +469,7 @@ export default function TerminalPage() {
           (t) => (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <span style={{ fontWeight: 600 }}>
-                ⚡ {instantTradeShares} {trade.side} @ {(trade.price * 100).toFixed(1)}¢
+                ⚡ {quantity} {trade.side} @ {(trade.price * 100).toFixed(1)}¢
               </span>
               <span style={{ fontSize: '12px', opacity: 0.8 }}>{trade.marketName}</span>
               <button
@@ -2178,9 +2180,13 @@ export default function TerminalPage() {
           allTrades={trades}
           isOpen={!!chartTrade}
           onClose={() => setChartTrade(null)}
-          onInstantTrade={(t) => {
+          onInstantTrade={(t, quantityOverride) => {
             setChartTrade(null);
-            executeInstantTrade(t as any);
+            if (quantityOverride && quantityOverride > 0) {
+              executeInstantTrade(t as any, quantityOverride);
+            } else {
+              executeInstantTrade(t as any);
+            }
           }}
           onOpenTradePanel={(t) => {
             setChartTrade(null);

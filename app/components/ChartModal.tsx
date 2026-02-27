@@ -46,7 +46,7 @@ interface ChartModalProps {
   allTrades: ChartTrade[];
   isOpen: boolean;
   onClose: () => void;
-  onInstantTrade?: (trade: ChartTrade) => void;
+  onInstantTrade?: (trade: ChartTrade, quantityOverride?: number) => void;
   onOpenTradePanel?: (trade: ChartTrade) => void;
   instantTradeShares?: number;
 }
@@ -711,7 +711,17 @@ export default function ChartModal({
               <div className="px-4 space-y-2 mt-auto pb-4">
                 <button
                   onClick={() => {
-                    if (onOpenTradePanel) {
+                    if (onInstantTrade) {
+                      onInstantTrade(
+                        {
+                          ...trade,
+                          side: tradeSide === 'yes' ? 'Yes' : 'No',
+                          price: tradeSide === 'yes' ? trade.price : 1 - trade.price,
+                        },
+                        tradeQuantity,
+                      );
+                      onClose();
+                    } else if (onOpenTradePanel) {
                       onClose();
                       onOpenTradePanel(trade);
                     }
