@@ -238,7 +238,15 @@ async function ensureMarketInfoMap(): Promise<void> {
         for (const mkt of (event.markets || [])) {
           const mktQuestion = mkt.question || '';
           const isAnonymized = ANON_PATTERN.test(mktQuestion);
-          const specificName = (mktQuestion && !isAnonymized) ? mktQuestion : name;
+          // Build best name: specific question > "GroupItem – Event" > event title
+          let specificName: string;
+          if (mktQuestion && !isAnonymized) {
+            specificName = mktQuestion;
+          } else if (mkt.groupItemTitle) {
+            specificName = `${mkt.groupItemTitle} – ${name}`;
+          } else {
+            specificName = name;
+          }
           const mktInfo: MarketInfo = {
             ...info,
             name: specificName,
@@ -576,23 +584,44 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         return eventList.slice(0, 30).flatMap((event: any, eIdx: number) => {
           const markets = event.markets || [];
           return markets.slice(0, 2).map((m: any, mIdx: number) => {
-            const price = parseFloat(m.lastTradePrice || m.bestBid || '0.5');
-            const shares = Math.floor(Math.random() * 100) + 1;
-            const notional = price * shares;
+            // Use outcomePrices for accurate pricing
+            let price = 0.5;
+            if (m.outcomePrices) {
+              try {
+                const prices = typeof m.outcomePrices === 'string'
+                  ? JSON.parse(m.outcomePrices)
+                  : m.outcomePrices;
+                price = parseFloat(prices[0]) || 0.5;
+              } catch { price = parseFloat(m.lastTradePrice || m.bestBid || '0.5'); }
+            } else {
+              price = parseFloat(m.lastTradePrice || m.bestBid || '0.5');
+            }
+            // Pick side based on actual probability
+            const isBuyYes = price <= 0.5 || Math.random() > 0.5;
+            const displaySide = isBuyYes ? 'Yes' : 'No';
+            const displayPrice = isBuyYes ? price : 1 - price;
+            const shares = Math.floor(Math.random() * 500) + 10;
+            const notional = displayPrice * shares;
             const eventSlug = event.slug || '';
             const externalUrl = eventSlug
               ? `https://polymarket.com/event/${eventSlug}`
               : `https://polymarket.com`;
+            // Use market-specific question (includes names/amounts), not event title
+            const marketName = (m.question && !ANON_RE.test(m.question))
+              ? m.question
+              : (m.groupItemTitle
+                  ? `${m.groupItemTitle} – ${event.title || 'Unknown'}`
+                  : event.title || 'Unknown');
 
             return {
               id: `poly-${baseTs}-${_polyEventOffset}-${eIdx}-${mIdx}`,
               provider: 'Polymarket' as const,
               type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
               marketId: m.conditionId || m.id || event.id || `poly-${eIdx}`,
-              marketName: m.question || event.title || 'Unknown',
-              side: Math.random() > 0.4 ? 'Yes' as const : 'No' as const,
-              price,
-              priceCents: `${(price * 100).toFixed(1)}¢`,
+              marketName,
+              side: displaySide as 'Yes' | 'No',
+              price: displayPrice,
+              priceCents: `${(displayPrice * 100).toFixed(1)}¢`,
               shares,
               notional,
               fee: Math.round(notional * 0.02 * 100) / 100,
@@ -748,18 +777,66 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
         return !isKalshiSportsTicker(ticker);
       })
       .map((t: any, idx: number) => {
-        const tradeSide = (t.side || 'yes').toLowerCase();
-        // Use side-specific price: NO trades use no_price, YES trades use yes_price
-        const yesRaw = t.yes_price ?? t.price ?? 50;
-        const price = tradeSide === 'no'
-          ? (t.no_price ?? (100 - yesRaw)) / 100
-          : yesRaw / 100;
-        const shares = t.count || t.size || 1;
-        const notional = price * shares;
+        // Kalshi API: taker_side = "yes"/"no", yes_price/no_price in CENTS (0-100),
+        // price in DOLLARS (0-1). Use taker_side first, fallback to side.
+        const tradeSide = (t.taker_side || t.side || 'yes').toLowerCase();
+
+        // Price: yes_price/no_price are in CENTS (0-100); price is in DOLLARS (0-1)
+        let price: number;
+        if (tradeSide === 'no') {
+          if (t.no_price != null) {
+            price = Number(t.no_price) / 100;
+          } else if (t.no_price_dollars != null) {
+            price = Number(t.no_price_dollars);
+          } else if (t.yes_price != null) {
+            price = 1 - Number(t.yes_price) / 100;
+          } else {
+            price = Number(t.price ?? 0.5);
+          }
+        } else {
+          if (t.yes_price != null) {
+            price = Number(t.yes_price) / 100;
+          } else if (t.yes_price_dollars != null) {
+            price = Number(t.yes_price_dollars);
+          } else {
+            price = Number(t.price ?? 0.5);
+          }
+        }
+
+        const shares = t.count || t.count_fp || t.size || 1;
+        const notional = price * Number(shares);
         const ticker = t.ticker || t.market_ticker || '';
         const resolvedInfo = resolveMarketInfo(ticker);
-        const resolvedName = resolvedInfo?.name
-          || t.market_title || t.title || '';
+
+        // Build name: resolved name from map, or parse ticker for range/target
+        let resolvedName = resolvedInfo?.name || t.market_title || t.title || '';
+        // If name is just the event title (no specific bet), extract from ticker
+        // e.g. KXBTCD-26FEB2712-T66249.99 → target $66,249.99
+        if (resolvedName && !resolvedName.includes(' to ') && !resolvedName.includes('$')) {
+          const targetMatch = ticker.match(/-T([\d.]+)$/i);
+          if (targetMatch) {
+            const target = Number(targetMatch[1]);
+            if (target > 0) {
+              const fmt = target >= 1000
+                ? `≤ $${target.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+                : `≤ $${target}`;
+              // Only prepend if the name doesn't already have the target
+              if (!resolvedName.includes(targetMatch[1])) {
+                resolvedName = `${fmt} – ${resolvedName}`;
+              }
+            }
+          }
+        }
+        // Fix redundant names like "X? – X?" where market and event titles overlap
+        if (resolvedName.includes(' – ')) {
+          const [a, b] = resolvedName.split(' – ');
+          const aClean = a.replace(/\?$/, '').trim().toLowerCase();
+          const bClean = b.replace(/\?$/, '').trim().toLowerCase();
+          if (aClean.includes(bClean) || bClean.includes(aClean)) {
+            resolvedName = a.length >= b.length ? a : b;
+          }
+        }
+
         const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
 
         const FAST_PREFIXES = ['KXBTC', 'KXETH', 'KXSOL', 'KXXRP', 'KXDOGE', 'KXAVAX', 'KXLINK', 'KXBNB'];
@@ -776,7 +853,7 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           side: tradeSide === 'yes' ? 'Yes' : 'No',
           price,
           priceCents: `${(price * 100).toFixed(1)}¢`,
-          shares,
+          shares: Number(shares),
           notional,
           fee: parseFloat(t.fee || '0') || Math.round(notional * 0.07 * 100) / 100,
           timestamp: t.created_time || t.executed_at || new Date().toISOString(),
