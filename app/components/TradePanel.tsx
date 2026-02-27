@@ -635,43 +635,52 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop - Click outside to close */}
+          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40"
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[59]"
           />
 
-          {/* Centered Slide-over Panel */}
+          {/* Panel — bottom-sheet on mobile, centered dialog on md+ */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-4"
+            initial={{ opacity: 0, y: '100%' }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: '100%' }}
+            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+            className="fixed inset-x-0 bottom-0 z-[60] md:inset-0 md:flex md:items-center md:justify-center md:p-4"
+            style={{ top: 0 }}
             onClick={(e) => {
-              // Only close if clicking directly on the backdrop, not on the content
-              if (e.target === e.currentTarget) {
-                onClose();
-              }
+              if (e.target === e.currentTarget) onClose();
             }}
           >
-            <div 
-              className="w-full h-full md:h-auto md:max-w-4xl bg-slate-950/50 backdrop-blur-md border border-white/5 md:rounded-2xl shadow-2xl overflow-hidden md:max-h-[90vh] overflow-y-auto"
-              onClick={(e) => {
-                // Prevent clicks inside the content from closing the panel
-                e.stopPropagation();
-              }}
-              onMouseDown={(e) => {
-                // Also prevent mousedown events from bubbling
-                e.stopPropagation();
-              }}
+            <div
+              className="w-full h-[92dvh] md:h-auto md:max-w-4xl bg-[#0c0c14] md:bg-slate-950/50 backdrop-blur-md border border-white/5 rounded-t-2xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden md:max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
             >
+              {/* ── Sticky mobile close header ── */}
+              <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-white/[0.06] bg-[#0c0c14]/95 backdrop-blur-md">
+                {/* Drag handle pill */}
+                <div className="md:hidden absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-white/20" />
+                <span className="text-sm font-bold text-white truncate max-w-[calc(100%-48px)]">{displayTitle}</span>
+                <button
+                  onClick={onClose}
+                  className="flex-shrink-0 p-2 -mr-1 rounded-xl hover:bg-white/10 transition-colors"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5 text-slate-400" strokeWidth={1.5} />
+                </button>
+              </div>
+
+              {/* ── Scrollable body ── */}
+              <div className="flex-1 overflow-y-auto">
+
               {/* Market Banner Image at the top */}
               {selectedMarket.imageUrl && (
-                <div className="relative w-full h-48 bg-slate-900/50 overflow-hidden">
+                <div className="relative w-full h-36 md:h-48 bg-slate-900/50 overflow-hidden flex-shrink-0">
                   <img
                     src={selectedMarket.imageUrl}
                     alt={displayTitle}
@@ -684,18 +693,18 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                 </div>
               )}
 
-              <div className="p-8">
-                {/* Close Button */}
+              <div className="p-4 md:p-8">
+                {/* Close Button — hidden on mobile (handled by sticky header above) */}
                 <button
                   onClick={onClose}
-                  className="absolute top-4 right-4 p-2 hover:bg-slate-800 rounded-lg transition-colors z-10"
+                  className="hidden md:flex absolute top-4 right-4 p-2 hover:bg-slate-800 rounded-lg transition-colors z-10"
                 >
                   <X className="w-5 h-5 text-slate-400" strokeWidth={1.5} />
                 </button>
 
                 {/* Event Title and Market Selection */}
-                <div className="mb-8">
-                  <h2 className="text-3xl font-bold text-white mb-4 leading-tight">
+                <div className="mb-6 md:mb-8">
+                  <h2 className="hidden md:block text-3xl font-bold text-white mb-4 leading-tight">
                     {displayTitle}
                   </h2>
                   
@@ -1408,6 +1417,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                   </p>
                 )}
               </div>
+              </div>{/* end scrollable body */}
             </div>
           </motion.div>
         </>

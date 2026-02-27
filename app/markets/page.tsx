@@ -902,16 +902,16 @@ export default function MarketsPage() {
             </div>
 
             {/* Source Toggle + Multi-Bet Button row */}
-            <div className="flex items-center justify-between w-full max-w-[600px] mx-auto px-4 md:px-0 mb-1">
+            <div className="flex flex-wrap items-center justify-between gap-y-2 w-full max-w-[600px] mx-auto px-3 md:px-0 mb-1">
               {/* Source Toggle — All / Polymarket / Kalshi */}
-              <div className="flex items-center gap-1 bg-white/[0.03] rounded-full p-1">
+              <div className="flex items-center gap-1 bg-white/[0.03] rounded-full p-1 flex-shrink-0">
                 {(['All', 'Polymarket', 'Kalshi'] as const).map((src) => {
                   const isActive = sourceFilter === src;
                   return (
                     <button
                       key={src}
                       onClick={() => setSourceFilter(src)}
-                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all ${
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.1em] transition-all ${
                         isActive
                           ? src === 'Kalshi'
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
@@ -922,7 +922,7 @@ export default function MarketsPage() {
                       }`}
                     >
                       {src !== 'All' && (
-                        <span className={`w-1.5 h-1.5 rounded-full ${
+                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                           src === 'Kalshi' ? 'bg-emerald-400' : 'bg-blue-400'
                         }`} />
                       )}
@@ -933,24 +933,23 @@ export default function MarketsPage() {
               </div>
 
               {/* Multi-Bet Toggle */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   onClick={() => {
                     if (parlayMode) {
-                      // Toggle slip visibility when already active
                       setParlaySlipOpen(prev => !prev);
                     } else {
                       setParlayMode(true);
                       setParlaySlipOpen(true);
                     }
                   }}
-                  className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all border ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.1em] transition-all border whitespace-nowrap ${
                     parlayMode
                       ? 'bg-violet-500/20 text-violet-300 border-violet-500/40'
                       : 'text-slate-400 border-white/10 hover:text-white hover:border-white/20 bg-white/[0.03]'
                   }`}
                 >
-                  <Layers className="w-3 h-3" />
+                  <Layers className="w-3 h-3 flex-shrink-0" />
                   Multi-Bet
                   {parlayLegs.length > 0 && (
                     <span className="ml-0.5 w-4 h-4 rounded-full bg-violet-500 text-white text-[9px] flex items-center justify-center font-black">
@@ -1116,13 +1115,14 @@ export default function MarketsPage() {
             initial={{ y: 60, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 60, opacity: 0, transition: { duration: 0.15 } }}
-            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-full bg-violet-950/90 border border-violet-500/30 backdrop-blur-xl shadow-2xl pointer-events-auto"
+            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[65] flex items-center gap-3 px-4 py-2.5 md:px-5 md:py-3 rounded-full bg-violet-950/90 border border-violet-500/30 backdrop-blur-xl shadow-2xl pointer-events-auto max-w-[calc(100vw-32px)]"
           >
-            <Layers className="w-3.5 h-3.5 text-violet-400" />
-            <span className="text-[11px] font-bold text-violet-200">
-              Multi-Bet active — open a market or click YES / NO to add a leg
+            <Layers className="w-3.5 h-3.5 text-violet-400 flex-shrink-0" />
+            <span className="text-[11px] font-bold text-violet-200 hidden sm:inline">
+              Multi-Bet active — click YES / NO to add a leg
             </span>
-            <span className="text-violet-400 font-black text-[11px]">{parlayLegs.length}/6</span>
+            <span className="text-[11px] font-bold text-violet-200 sm:hidden">Multi-Bet</span>
+            <span className="text-violet-400 font-black text-[11px] flex-shrink-0">{parlayLegs.length}/6</span>
             <button
               onClick={() => setParlaySlipOpen(prev => !prev)}
               className="px-3 py-1 rounded-full bg-violet-500/30 text-violet-200 text-[10px] font-bold hover:bg-violet-500/50 transition-all"
@@ -1146,7 +1146,7 @@ export default function MarketsPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0, transition: { duration: 0 } }}
               onClick={() => setParlaySlipOpen(false)}
-              className="fixed inset-0 z-40 bg-black/20"
+              className="fixed inset-0 z-[64] bg-black/20"
             />
             {/* Slip */}
             <motion.div
@@ -1154,7 +1154,7 @@ export default function MarketsPage() {
               animate={{ x: 0 }}
               exit={{ x: '100%', transition: { duration: 0.15 } }}
               transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-              className="fixed right-0 top-0 h-full w-full max-w-sm z-50 bg-[#09090F] border-l border-white/5 shadow-2xl flex flex-col"
+              className="fixed right-0 top-16 h-[calc(100%-64px)] w-full max-w-sm z-[65] bg-[#09090F] border-l border-white/5 shadow-2xl flex flex-col"
             >
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">

@@ -236,7 +236,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </main>
         
       {/* Mobile Menu Button */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-[#050505]/95 backdrop-blur-md border-b border-[#1A1A1A] px-4 flex items-center justify-between">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-[80] h-16 bg-[#050505]/95 backdrop-blur-md border-b border-[#1A1A1A] px-4 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3">
           <div className="w-9 h-9 bg-[#4FFFC8] rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(79,255,200,0.3)]">
             <TrendingUp className="w-5 h-5 text-black" strokeWidth={1.5} />
@@ -253,7 +253,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Sidebar */}
       {mobileMenuOpen && (
-        <div className="lg:hidden fixed inset-0 z-40 bg-[#050505]/98 backdrop-blur-xl mt-16">
+        <div className="lg:hidden fixed inset-0 z-[75] bg-[#050505]/98 backdrop-blur-xl mt-16">
           <div className="pt-8 px-4">
             <nav className="space-y-1">
               {allNavItems.map((item) => {
