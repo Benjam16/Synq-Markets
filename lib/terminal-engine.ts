@@ -567,76 +567,6 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
     });
 
     if (!res.ok) {
-      // Fallback: rotate through events for diverse synthetic trades
-      _polyEventOffset = (_polyEventOffset + 15) % 200; // cycle offset
-      const altRes = await fetch(
-        `https://gamma-api.polymarket.com/events?active=true&closed=false&limit=50&offset=${_polyEventOffset}&order=volume&ascending=false`,
-        { method: 'GET', headers: { 'Accept': 'application/json' }, cache: 'no-store' },
-      );
-
-      if (altRes.ok) {
-        const events = await altRes.json();
-        const eventList = Array.isArray(events) ? events : (events?.data || events?.events || []);
-        polyConnected = true;
-        const baseTs = Date.now();
-
-        // Generate synthetic trades from diverse events
-        return eventList.slice(0, 30).flatMap((event: any, eIdx: number) => {
-          const markets = event.markets || [];
-          return markets.slice(0, 2).map((m: any, mIdx: number) => {
-            // Use outcomePrices for accurate pricing
-            let price = 0.5;
-            if (m.outcomePrices) {
-              try {
-                const prices = typeof m.outcomePrices === 'string'
-                  ? JSON.parse(m.outcomePrices)
-                  : m.outcomePrices;
-                price = parseFloat(prices[0]) || 0.5;
-              } catch { price = parseFloat(m.lastTradePrice || m.bestBid || '0.5'); }
-            } else {
-              price = parseFloat(m.lastTradePrice || m.bestBid || '0.5');
-            }
-            // Pick side based on actual probability
-            const isBuyYes = price <= 0.5 || Math.random() > 0.5;
-            const displaySide = isBuyYes ? 'Yes' : 'No';
-            const displayPrice = isBuyYes ? price : 1 - price;
-            const shares = Math.floor(Math.random() * 500) + 10;
-            const notional = displayPrice * shares;
-            const eventSlug = event.slug || '';
-            const externalUrl = eventSlug
-              ? `https://polymarket.com/event/${eventSlug}`
-              : `https://polymarket.com`;
-            // Use market-specific question (includes names/amounts), not event title
-            const marketName = (m.question && !ANON_RE.test(m.question))
-              ? m.question
-              : (m.groupItemTitle
-                  ? `${m.groupItemTitle} – ${event.title || 'Unknown'}`
-                  : event.title || 'Unknown');
-
-            return {
-              id: `poly-${baseTs}-${_polyEventOffset}-${eIdx}-${mIdx}`,
-              provider: 'Polymarket' as const,
-              type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
-              marketId: m.conditionId || m.id || event.id || `poly-${eIdx}`,
-              marketName,
-              side: displaySide as 'Yes' | 'No',
-              price: displayPrice,
-              priceCents: `${(displayPrice * 100).toFixed(1)}¢`,
-              shares,
-              notional,
-              fee: Math.round(notional * 0.02 * 100) / 100,
-              timestamp: new Date(baseTs - (eIdx * 2 + mIdx) * 29).toISOString(),
-              walletAddress: `0x${Math.random().toString(16).slice(2, 6)}...${Math.random().toString(16).slice(2, 6)}`,
-              isWhale: notional >= WHALE_THRESHOLD,
-              externalUrl,
-              slug: eventSlug,
-              category: event.category || '',
-              imageUrl: event.image || event.icon || '',
-            };
-          });
-        });
-      }
-
       polyConnected = false;
       return [];
     }
@@ -873,48 +803,7 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
 
     console.log(`[Terminal] Kalshi: ${trades.length} raw → ${realTrades.length} after sports + name filter`);
 
-    // Supplement with synthetic event-based trades if too few real trades survived filtering
-    const TARGET_KALSHI = 40;
-    if (realTrades.length < TARGET_KALSHI && _marketInfoMap.size > 0) {
-      const kalshiEntries = Array.from(_marketInfoMap.entries())
-        .filter(([, info]) => info.externalUrl.includes('kalshi.com'))
-        .filter(([key]) => !isKalshiSportsTicker(key.toUpperCase()));
-
-      if (kalshiEntries.length > 0) {
-        _kalshiEventOffset = (_kalshiEventOffset + 12) % kalshiEntries.length;
-        const needed = TARGET_KALSHI - realTrades.length;
-        const baseTs = Date.now();
-
-        for (let i = 0; i < needed && i < kalshiEntries.length; i++) {
-          const idx = (_kalshiEventOffset + i) % kalshiEntries.length;
-          const [ticker, info] = kalshiEntries[idx];
-          const price = 0.15 + Math.random() * 0.7;
-          const shares = Math.floor(Math.random() * 150) + 5;
-          const notional = price * shares;
-
-          realTrades.push({
-            id: `kalshi-ev-${baseTs}-${i}`,
-            provider: 'Kalshi' as const,
-            type: Math.random() > 0.5 ? 'FILL' as const : 'ORDER' as const,
-            marketId: ticker,
-            marketName: info.name,
-            side: (Math.random() > 0.4 ? 'Yes' : 'No') as 'Yes' | 'No',
-            price,
-            priceCents: `${(price * 100).toFixed(1)}¢`,
-            shares,
-            notional,
-            fee: Math.round(notional * 0.07 * 100) / 100,
-            timestamp: new Date(baseTs - i * 43).toISOString(),
-            isWhale: notional >= WHALE_THRESHOLD,
-            externalUrl: info.externalUrl,
-            category: info.category || '',
-            imageUrl: info.imageUrl || '',
-          });
-        }
-        console.log(`[Terminal] Kalshi supplemented: ${needed} event-based trades added (total ${realTrades.length})`);
-      }
-    }
-
+    // Return ONLY real trades; do not synthesize additional Kalshi trades
     return realTrades;
   } catch (err) {
     console.warn('[Terminal] Kalshi trades fetch error:', err);
