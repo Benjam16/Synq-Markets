@@ -216,10 +216,22 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const result = await query(
-      `SELECT id, email, full_name, role, paypal_email, created_at, updated_at FROM users WHERE email = $1 LIMIT 1`,
-      [email]
-    );
+    let result;
+    try {
+      result = await query(
+        `SELECT id, email, full_name, role, paypal_email, created_at, updated_at FROM users WHERE email = $1 LIMIT 1`,
+        [email]
+      );
+    } catch (colError: any) {
+      if (colError.message?.includes('paypal_email') || colError.code === '42703') {
+        result = await query(
+          `SELECT id, email, full_name, role, created_at, updated_at FROM users WHERE email = $1 LIMIT 1`,
+          [email]
+        );
+      } else {
+        throw colError;
+      }
+    }
 
     if (result.rows.length === 0) {
       return NextResponse.json(
@@ -230,7 +242,6 @@ export async function GET(req: NextRequest) {
 
     const userData = result.rows[0];
     
-    // Include paypal_email if column exists (graceful fallback if migration not run yet)
     return NextResponse.json({ 
       user: {
         id: userData.id,

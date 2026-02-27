@@ -33,16 +33,21 @@ export async function POST(req: NextRequest) {
     const supabaseUserId = userData.supabase_user_id;
 
     // Update user profile in PostgreSQL database
-    await query(
-      `
-      UPDATE users
-      SET full_name = $1,
-          paypal_email = $2,
-          updated_at = NOW()
-      WHERE id = $3
-      `,
-      [fullName || null, paypalEmail || null, userId]
-    );
+    try {
+      await query(
+        `UPDATE users SET full_name = $1, paypal_email = $2, updated_at = NOW() WHERE id = $3`,
+        [fullName || null, paypalEmail || null, userId]
+      );
+    } catch (colError: any) {
+      if (colError.message?.includes('paypal_email') || colError.code === '42703') {
+        await query(
+          `UPDATE users SET full_name = $1, updated_at = NOW() WHERE id = $2`,
+          [fullName || null, userId]
+        );
+      } else {
+        throw colError;
+      }
+    }
 
     // Also sync to Supabase Auth metadata if Supabase user ID exists
     if (supabaseUserId && supabaseServiceKey) {
