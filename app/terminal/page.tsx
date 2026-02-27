@@ -447,7 +447,11 @@ export default function TerminalPage() {
       // Build external URL for dashboard links
       const providerLower = (market.provider || 'polymarket').toLowerCase();
       const extUrl = providerLower === 'kalshi'
-        ? (market.kalshiUrl || `https://kalshi.com/markets/${(trade.marketId || '').replace(/^kalshi-/i, '').toLowerCase()}`)
+        ? (market.kalshiUrl || (() => {
+            const raw = (trade.marketId || '').replace(/^kalshi-/i, '');
+            const seriesPart = raw.split('-')[0].toLowerCase();
+            return `https://kalshi.com/markets/${seriesPart}`;
+          })())
         : (market.polymarketUrl || (market.slug ? `https://polymarket.com/event/${market.slug}` : ''));
 
       const res = await fetch('/api/buy', {

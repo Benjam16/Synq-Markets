@@ -422,11 +422,19 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
 
       // Call buy or sell API based on tradeType
       const apiEndpoint = tradeType === 'sell' ? '/api/sell' : '/api/buy';
-      // Build external URL for dashboard tracking
       const provLower = (selectedMarket.provider || 'polymarket').toLowerCase();
+
+      // Build external URL: Kalshi uses series_ticker only, Polymarket uses event slug
       const extUrl = provLower === 'kalshi'
-        ? ((selectedMarket as any).kalshiUrl || `https://kalshi.com/markets/${(selectedMarket.slug || selectedMarket.conditionId || '').toLowerCase()}`)
+        ? ((selectedMarket as any).kalshiUrl || (() => {
+            const slug = (selectedMarket.slug || selectedMarket.conditionId || '').toLowerCase();
+            const seriesPart = slug.split('-')[0];
+            return `https://kalshi.com/markets/${seriesPart}`;
+          })())
         : ((selectedMarket as any).polymarketUrl || (selectedMarket.slug ? `https://polymarket.com/event/${selectedMarket.slug}` : ''));
+
+      // Pass the outcome's token_id for Polymarket price cache lookups
+      const outcomeTokenId = currentOutcome?.tokenId || undefined;
 
       const res = await fetch(apiEndpoint, {
         method: 'POST',
@@ -443,6 +451,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
           marketName: selectedMarket.eventTitle || selectedMarket.name || displayTitle,
           category: selectedMarket.category || 'General',
           externalUrl: extUrl || undefined,
+          tokenId: outcomeTokenId,
           ...(tradeType === 'buy' && stopLossEnabled && Number(stopLossCents) > 0
             ? { stopLossCents: Number(stopLossCents) }
             : {}),

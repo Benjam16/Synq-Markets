@@ -1096,11 +1096,11 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
             });
 
             // ── Build Kalshi URL ──
-            // Format: https://kalshi.com/markets/{series_ticker}/{event_ticker}
-            // Falls back to https://kalshi.com/markets/{event_ticker} if no series
+            // Kalshi pages live at /markets/{series_ticker} (e.g. /markets/kxeth).
+            // Adding the full event_ticker to the path causes a 404.
             const kalshiSlug = seriesTicker
-              ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
-              : eventTicker.toLowerCase();
+              ? seriesTicker.toLowerCase()
+              : eventTicker.split('-')[0].toLowerCase();
 
             const kalshiUrl = `https://kalshi.com/markets/${kalshiSlug}`;
 

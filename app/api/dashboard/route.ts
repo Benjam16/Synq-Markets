@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { query } from "@/lib/db";
 import { Position, Tier } from "@/lib/types";
+import { fetchAllMarkets } from "@/lib/market-fetchers";
 
 type TradeRow = {
   id: number;
@@ -307,7 +308,35 @@ export async function GET(req: NextRequest) {
           cachedKeys.add(key);
         });
         
-        // STEP 2: For cache misses, use entry price as fallback
+        // STEP 2: For cache misses, try live market data (in-memory 30s cache)
+        const missingKeys = tradesRes.rows
+          .filter((t: any) => !cachedKeys.has(`${t.provider}:${t.market_id}`))
+          .map((t: any) => ({ provider: t.provider, market_id: t.market_id, price: t.price }));
+
+        if (missingKeys.length > 0) {
+          try {
+            const liveMarkets = await fetchAllMarkets(500);
+            for (const mk of missingKeys) {
+              const key = `${mk.provider}:${mk.market_id}`;
+              const found = liveMarkets.find(m =>
+                m.id === mk.market_id ||
+                m.conditionId === mk.market_id ||
+                m.id.endsWith(mk.market_id) ||
+                mk.market_id.endsWith(m.id)
+              );
+              if (found && found.price > 0 && found.price < 1) {
+                priceMap.set(key, found.price);
+                yesPriceMap.set(key, found.price);
+                noPriceMap.set(key, 1 - found.price);
+                cachedKeys.add(key);
+              }
+            }
+          } catch {
+            // live fetch failed — will use entry price fallback below
+          }
+        }
+
+        // STEP 3: Last resort — use entry price for anything still missing
         tradesRes.rows.forEach((t: any) => {
           const key = `${t.provider}:${t.market_id}`;
           if (!cachedKeys.has(key)) {

@@ -11,6 +11,7 @@ export type MarketOutcome = {
   name: string;
   price: number; 
   volume?: number;
+  tokenId?: string;
 };
 
 export type Market = {

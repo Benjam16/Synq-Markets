@@ -79,10 +79,10 @@ async function ensureMarketInfoMap(): Promise<void> {
           const eventTicker = event.event_ticker || '';
           const seriesTicker = event.series_ticker || '';
 
-          // Build Kalshi URL
+          // Build Kalshi URL (series_ticker only — full event_ticker causes 404)
           const kalshiSlug = seriesTicker
-            ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
-            : eventTicker.toLowerCase();
+            ? seriesTicker.toLowerCase()
+            : eventTicker.split('-')[0].toLowerCase();
           // Build image URL
           let kalshiImg = '';
           if (seriesTicker) {
@@ -156,8 +156,8 @@ async function ensureMarketInfoMap(): Promise<void> {
               const eventTicker = event.event_ticker || '';
               const seriesTicker = event.series_ticker || '';
               const kalshiSlug = seriesTicker
-                ? `${seriesTicker.toLowerCase()}/${eventTicker.toLowerCase()}`
-                : eventTicker.toLowerCase();
+                ? seriesTicker.toLowerCase()
+                : eventTicker.split('-')[0].toLowerCase();
               let kalshiImg = '';
               if (seriesTicker) {
                 kalshiImg = `https://kalshi-public-docs.s3.amazonaws.com/series-images-webp/${seriesTicker}.webp`;
@@ -297,10 +297,11 @@ function resolveExternalUrl(ticker: string, provider: 'Polymarket' | 'Kalshi', f
   const info = resolveMarketInfo(ticker);
   if (info?.externalUrl) return info.externalUrl;
 
-  // Fallback: construct URL from event ticker
+  // Fallback: construct URL from series ticker (first segment before date)
   if (provider === 'Kalshi') {
     const eventTicker = fallbackEventTicker || ticker;
-    return `https://kalshi.com/markets/${eventTicker.toLowerCase()}`;
+    const seriesPart = eventTicker.split('-')[0].toLowerCase();
+    return `https://kalshi.com/markets/${seriesPart}`;
   }
   return `https://polymarket.com`;
 }

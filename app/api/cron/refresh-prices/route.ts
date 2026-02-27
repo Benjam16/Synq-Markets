@@ -4,7 +4,7 @@ import { query } from '@/lib/db';
 const POLYMARKET_CLOB = 'https://clob.polymarket.com';
 const KALSHI_API = 'https://api.elections.kalshi.com/trade-api/v2';
 
-async function fetchPolymarketPrice(tokenId: string): Promise<number | null> {
+async function fetchPolymarketPriceByToken(tokenId: string): Promise<number | null> {
   try {
     const res = await fetch(`${POLYMARKET_CLOB}/price?token_id=${tokenId}&side=buy`, {
       signal: AbortSignal.timeout(5000),
@@ -12,6 +12,25 @@ async function fetchPolymarketPrice(tokenId: string): Promise<number | null> {
     if (!res.ok) return null;
     const data = await res.json();
     return typeof data.price === 'number' ? data.price : Number(data.price) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchPolymarketPriceBySlug(conditionId: string): Promise<number | null> {
+  // Fallback: try Gamma API to get price by condition ID
+  try {
+    const res = await fetch(
+      `https://gamma-api.polymarket.com/markets?condition_id=${conditionId}&limit=1`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const market = Array.isArray(data) ? data[0] : data;
+    if (!market) return null;
+    const prices = market.outcomePrices ? JSON.parse(market.outcomePrices) : [];
+    const yesPrice = parseFloat(prices[0]);
+    return !isNaN(yesPrice) && yesPrice > 0 && yesPrice < 1 ? yesPrice : null;
   } catch {
     return null;
   }
@@ -101,18 +120,43 @@ export async function GET(_req: NextRequest) {
       return NextResponse.json({ updated: 0, elapsed: Date.now() - start });
     }
 
-    // 4. Fetch prices in parallel (batched by provider)
+    // 4. Look up stored token_ids for Polymarket markets
     const polyMarkets = allMarkets.filter(m => m.provider === 'polymarket');
     const kalshiMarkets = allMarkets.filter(m => m.provider === 'kalshi');
 
+    // Build a map of market_id → token_id from market_metadata
+    const tokenIdMap = new Map<string, string>();
+    if (polyMarkets.length > 0) {
+      try {
+        const tokenRows = await query<{ market_id: string; token_id: string }>(
+          `SELECT market_id, token_id FROM market_metadata
+           WHERE provider = 'polymarket' AND token_id IS NOT NULL AND token_id != ''
+             AND market_id = ANY($1::text[])`,
+          [polyMarkets.map(m => m.market_id)],
+        );
+        for (const row of tokenRows.rows) {
+          tokenIdMap.set(row.market_id, row.token_id);
+        }
+      } catch {
+        // token_id column may not exist yet
+      }
+    }
+
     const updates: { provider: string; market_id: string; price: number }[] = [];
 
-    // Polymarket — fetch in parallel batches of 10
+    // Polymarket — try token_id first (CLOB), fall back to Gamma API by condition_id
     for (let i = 0; i < polyMarkets.length; i += 10) {
       const batch = polyMarkets.slice(i, i + 10);
-      const results = await Promise.allSettled(
+      await Promise.allSettled(
         batch.map(async (m) => {
-          const price = await fetchPolymarketPrice(m.market_id);
+          let price: number | null = null;
+          const tokenId = tokenIdMap.get(m.market_id);
+          if (tokenId) {
+            price = await fetchPolymarketPriceByToken(tokenId);
+          }
+          if (price === null) {
+            price = await fetchPolymarketPriceBySlug(m.market_id);
+          }
           if (price !== null && price > 0 && price < 1) {
             updates.push({ provider: m.provider, market_id: m.market_id, price });
           }

@@ -1793,8 +1793,10 @@ function DashboardContent() {
                         if ((pos as any).externalUrl) return (pos as any).externalUrl;
                         if (pos.provider === 'Kalshi' || market?.provider === 'Kalshi') {
                           if ((market as any)?.kalshiUrl) return (market as any).kalshiUrl;
-                          const ticker = market?.slug || market?.conditionId || pos.marketId.replace(/^kalshi-/i, '');
-                          return `https://kalshi.com/markets/${ticker.toLowerCase()}`;
+                          // Kalshi URLs use series_ticker only (e.g. /markets/kxeth)
+                          const raw = market?.slug || market?.conditionId || pos.marketId.replace(/^kalshi-/i, '');
+                          const seriesPart = raw.split('-')[0].toLowerCase();
+                          return `https://kalshi.com/markets/${seriesPart}`;
                         }
                         if (market?.polymarketUrl) return market.polymarketUrl;
                         if (market) {

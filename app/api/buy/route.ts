@@ -39,34 +39,35 @@ export async function POST(req: NextRequest) {
   try {
     await client.query("BEGIN");
 
-    // Fast price lookup: Cache first, then entry price, then API (only if needed)
+    // Price resolution: trust the frontend-provided price first (user sees the
+    // real live price on screen).  Fall back to cache/API only when needed.
     let currentPrice = 0;
-    try {
-      const priceResult = await getMarketPriceFast(
-        provider,
-        marketId,
-        side as 'yes' | 'no',
-        outcome,
-        undefined // No entry price for new buys
-      );
-      
-      currentPrice = priceResult.price;
-      
-      // Log price source for debugging
-      if (priceResult.source === 'api') {
-        console.log(`[Buy] Price from API for ${provider}:${marketId} (slow)`);
-      } else {
-        console.log(`[Buy] Price from ${priceResult.source} for ${provider}:${marketId} (fast)`);
+    const frontendPrice = body.price != null ? Number(body.price) : NaN;
+
+    if (!isNaN(frontendPrice) && frontendPrice > 0 && frontendPrice < 1) {
+      currentPrice = frontendPrice;
+      console.log(`[Buy] Using frontend price for ${provider}:${marketId}: ${currentPrice}`);
+    } else {
+      try {
+        const priceResult = await getMarketPriceFast(
+          provider,
+          marketId,
+          side as 'yes' | 'no',
+          outcome,
+          undefined
+        );
+        currentPrice = priceResult.price;
+        console.log(`[Buy] Price from ${priceResult.source} for ${provider}:${marketId}: ${currentPrice}`);
+      } catch (priceError) {
+        console.error('Error fetching current price:', priceError);
+        await client.query("ROLLBACK");
+        return NextResponse.json(
+          { error: "Failed to fetch current market price" },
+          { status: 500 },
+        );
       }
-    } catch (priceError) {
-      console.error('Error fetching current price:', priceError);
-      await client.query("ROLLBACK");
-      return NextResponse.json(
-        { error: "Failed to fetch current market price" },
-        { status: 500 },
-      );
     }
-    
+
     if (currentPrice <= 0) {
       await client.query("ROLLBACK");
       return NextResponse.json(
@@ -259,35 +260,36 @@ export async function POST(req: NextRequest) {
 
     await client.query("COMMIT");
 
-    // Save market name + external URL to market_metadata so dashboard can display it
+    // Save market name, external URL, and token_id to market_metadata
     const marketName = body.marketName ? String(body.marketName) : null;
     const externalUrl = body.externalUrl ? String(body.externalUrl) : null;
+    const tokenId = body.tokenId ? String(body.tokenId) : null;
     if (marketName) {
       try {
-        // Try with external_url column first
         await client.query(
-          `INSERT INTO market_metadata (provider, market_id, name, category, external_url)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO market_metadata (provider, market_id, name, category, external_url, token_id)
+           VALUES ($1, $2, $3, $4, $5, $6)
            ON CONFLICT (provider, market_id)
            DO UPDATE SET name = EXCLUDED.name, updated_at = NOW(),
-              external_url = COALESCE(EXCLUDED.external_url, market_metadata.external_url)`,
-          [provider, marketId, marketName, body.category || 'General', externalUrl]
+              external_url = COALESCE(EXCLUDED.external_url, market_metadata.external_url),
+              token_id = COALESCE(EXCLUDED.token_id, market_metadata.token_id)`,
+          [provider, marketId, marketName, body.category || 'General', externalUrl, tokenId]
         );
       } catch (metaErr: any) {
-        if (metaErr?.message?.includes('external_url') || metaErr?.code === '42703') {
-          // external_url column doesn't exist yet — auto-add it
+        if (metaErr?.message?.includes('token_id') || metaErr?.message?.includes('external_url') || metaErr?.code === '42703') {
           try {
             await client.query(`ALTER TABLE market_metadata ADD COLUMN IF NOT EXISTS external_url TEXT`);
+            await client.query(`ALTER TABLE market_metadata ADD COLUMN IF NOT EXISTS token_id TEXT`);
             await client.query(
-              `INSERT INTO market_metadata (provider, market_id, name, category, external_url)
-               VALUES ($1, $2, $3, $4, $5)
+              `INSERT INTO market_metadata (provider, market_id, name, category, external_url, token_id)
+               VALUES ($1, $2, $3, $4, $5, $6)
                ON CONFLICT (provider, market_id)
                DO UPDATE SET name = EXCLUDED.name, updated_at = NOW(),
-                  external_url = COALESCE(EXCLUDED.external_url, market_metadata.external_url)`,
-              [provider, marketId, marketName, body.category || 'General', externalUrl]
+                  external_url = COALESCE(EXCLUDED.external_url, market_metadata.external_url),
+                  token_id = COALESCE(EXCLUDED.token_id, market_metadata.token_id)`,
+              [provider, marketId, marketName, body.category || 'General', externalUrl, tokenId]
             );
           } catch (alterErr) {
-            // Last resort: save without external_url
             try {
               await client.query(
                 `INSERT INTO market_metadata (provider, market_id, name, category)
