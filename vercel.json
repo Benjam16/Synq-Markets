@@ -5,17 +5,8 @@
   "framework": "nextjs",
   "regions": ["iad1"],
   "crons": [
-    {
-      "path": "/api/cron/drawdown-check",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/cron/midnight-reset",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/cron/refresh-prices",
-      "schedule": "*/2 * * * *"
-    }
+    {"path": "/api/cron/drawdown-check", "schedule": "0 0 * * *"},
+    {"path": "/api/cron/midnight-reset", "schedule": "0 0 * * *"},
+    {"path": "/api/cron/refresh-prices", "schedule": "0 1 * * *"}
   ]
 }
