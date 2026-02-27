@@ -193,7 +193,7 @@ async function ensureMarketInfoMap(): Promise<void> {
   // ── 2. Fetch Polymarket events directly ──
   try {
     const polyRes = await fetch(
-      'https://gamma-api.polymarket.com/events?active=true&closed=false&limit=200&order=volume&ascending=false',
+      'https://gamma-api.polymarket.com/events?active=true&closed=false&limit=500&order=volume&ascending=false',
       { cache: 'no-store' },
     );
     if (polyRes.ok) {
@@ -211,11 +211,13 @@ async function ensureMarketInfoMap(): Promise<void> {
         if (event.id) m.set(event.id.toString().toLowerCase(), info);
         if (event.slug) m.set(event.slug.toLowerCase(), info);
         // Index by each market's condition_id (what the CLOB trades API returns)
-        // Use market-specific question so the terminal shows the specific bet,
-        // e.g. "Will Leonardo DiCaprio win Best Actor at the Oscars 2026?"
+        // Use market-specific question when it has real names;
+        // fall back to event title when the question is anonymized
+        const ANON_PATTERN = /\b(Person|Player|Company|Team|Candidate|Entity)\s+[A-Z]\b/i;
         for (const mkt of (event.markets || [])) {
           const mktQuestion = mkt.question || '';
-          const specificName = mktQuestion || name;
+          const isAnonymized = ANON_PATTERN.test(mktQuestion);
+          const specificName = (mktQuestion && !isAnonymized) ? mktQuestion : name;
           const mktInfo: MarketInfo = {
             ...info,
             name: specificName,
@@ -486,10 +488,13 @@ function tieredShares(price: number, tier: 'low' | 'medium' | 'high'): number {
   return Math.max(1, Math.round(notional / safePx));
 }
 
+const ANON_RE = /\b(Person|Player|Company|Team|Candidate|Entity)\s+[A-Z]\b/i;
+
 // ── Generates synthetic trades for a specific notional tier from the info map ──
 function generateSyntheticTrades(count: number, tier: 'low' | 'medium' | 'high', baseTs: number): TerminalTrade[] {
   if (_marketInfoMap.size === 0) return [];
-  const entries = Array.from(_marketInfoMap.entries());
+  const entries = Array.from(_marketInfoMap.entries())
+    .filter(([, info]) => info.name && info.name.length >= 10 && !ANON_RE.test(info.name));
   if (entries.length === 0) return [];
   const trades: TerminalTrade[] = [];
   for (let i = 0; i < count; i++) {
@@ -602,11 +607,16 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
       const conditionId = t.market || t.asset_id || t.condition_id || '';
 
       // Resolve name: try market info map first, then fallback to slug/raw
+      // Skip anonymized names from CLOB API (e.g. "Will Person L...")
       const resolvedInfo = resolveMarketInfo(conditionId);
-      const marketName = resolvedInfo?.name
+      let rawName = resolvedInfo?.name
         || t.title || t.question
         || (tradeSlug ? tradeSlug.replace(/-/g, ' ') : '')
         || `Market ${conditionId?.slice(0, 8) || idx}`;
+      if (ANON_RE.test(rawName) && resolvedInfo?.name) {
+        rawName = resolvedInfo.name;
+      }
+      const marketName = rawName;
       // Only use slug-based URLs (condition IDs in URLs cause Polymarket 404s)
       const externalUrl = resolvedInfo?.externalUrl
         || (tradeSlug && !tradeSlug.startsWith('0x') && tradeSlug.length > 5
@@ -633,6 +643,10 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         category: resolvedInfo?.category || '',
         imageUrl: resolvedInfo?.imageUrl || '',
       };
+    }).filter((trade: any) => {
+      if (!trade.marketName || trade.marketName.length < 5) return false;
+      if (ANON_RE.test(trade.marketName)) return false;
+      return true;
     });
   } catch (err) {
     console.warn('[Terminal] Polymarket trades fetch error:', err);
@@ -727,11 +741,11 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           imageUrl: resolvedInfo?.imageUrl || '',
         };
       })
-      // Drop trades where the name is still an unresolved raw ticker
+      // Drop trades with unresolved tickers or anonymized names
       .filter((trade: any) => {
         if (!trade.marketName) return false;
-        // If the name contains no spaces and starts with KX, it's an unresolved ticker
         if (trade.marketName.startsWith('KX') && !trade.marketName.includes(' ')) return false;
+        if (ANON_RE.test(trade.marketName)) return false;
         return true;
       });
 

@@ -338,7 +338,74 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        // STEP 3: Last resort — use entry price for anything still missing
+        // STEP 3: Direct API lookup for remaining cache misses
+        const stillMissing = tradesRes.rows.filter(
+          (t: any) => !cachedKeys.has(`${t.provider}:${t.market_id}`)
+        );
+        if (stillMissing.length > 0) {
+          await Promise.allSettled(stillMissing.map(async (t: any) => {
+            const key = `${t.provider}:${t.market_id}`;
+            if (cachedKeys.has(key)) return;
+            try {
+              const prov = (t.provider || '').toLowerCase();
+              if (prov === 'kalshi') {
+                const ticker = t.market_id.replace(/^kalshi-/i, '');
+                const r = await fetch(
+                  `https://api.elections.kalshi.com/trade-api/v2/markets/${ticker}`,
+                  { signal: AbortSignal.timeout(4000) }
+                );
+                if (r.ok) {
+                  const d = await r.json();
+                  const mk = d.market || d;
+                  const raw = mk.yes_ask ?? mk.yes_bid ?? mk.last_price;
+                  if (raw != null) {
+                    const yp = Number(raw) <= 1 ? Number(raw) : Number(raw) / 100;
+                    priceMap.set(key, yp);
+                    yesPriceMap.set(key, yp);
+                    noPriceMap.set(key, 1 - yp);
+                    cachedKeys.add(key);
+                    // Write to cache for next time
+                    query(
+                      `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
+                       VALUES ($1, $2, $3, NOW())
+                       ON CONFLICT (provider, market_id)
+                       DO UPDATE SET last_price = EXCLUDED.last_price, as_of = EXCLUDED.as_of`,
+                      [prov, t.market_id, yp.toString()]
+                    ).catch(() => {});
+                  }
+                }
+              } else {
+                const r = await fetch(
+                  `https://gamma-api.polymarket.com/markets?condition_id=${t.market_id}&limit=1`,
+                  { signal: AbortSignal.timeout(4000) }
+                );
+                if (r.ok) {
+                  const d = await r.json();
+                  const mk = Array.isArray(d) ? d[0] : d;
+                  if (mk?.outcomePrices) {
+                    const prices = JSON.parse(mk.outcomePrices);
+                    const yp = parseFloat(prices[0]);
+                    if (!isNaN(yp) && yp > 0 && yp < 1) {
+                      priceMap.set(key, yp);
+                      yesPriceMap.set(key, yp);
+                      noPriceMap.set(key, 1 - yp);
+                      cachedKeys.add(key);
+                      query(
+                        `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
+                         VALUES ($1, $2, $3, NOW())
+                         ON CONFLICT (provider, market_id)
+                         DO UPDATE SET last_price = EXCLUDED.last_price, as_of = EXCLUDED.as_of`,
+                        [prov, t.market_id, yp.toString()]
+                      ).catch(() => {});
+                    }
+                  }
+                }
+              }
+            } catch { /* direct lookup failed — will use entry price */ }
+          }));
+        }
+
+        // STEP 4: Last resort — use entry price for anything still missing
         tradesRes.rows.forEach((t: any) => {
           const key = `${t.provider}:${t.market_id}`;
           if (!cachedKeys.has(key)) {

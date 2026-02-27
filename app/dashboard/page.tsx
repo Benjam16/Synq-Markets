@@ -262,10 +262,19 @@ function DashboardContent() {
           // Use parlays from dashboard API (includes live leg prices)
           if (data.parlays) {
             setParlays(data.parlays);
+            // Auto-expand the first parlay on initial load
+            if (data.parlays.length > 0 && parlaysExpanded.size === 0) {
+              setParlaysExpanded(new Set([data.parlays[0].id]));
+            }
           } else if (dbUserId) {
             fetch(`/api/parlay?userId=${dbUserId}`)
               .then(r => r.ok ? r.json() : { parlays: [] })
-              .then(d => setParlays(d.parlays || []))
+              .then(d => {
+                setParlays(d.parlays || []);
+                if (d.parlays?.length > 0 && parlaysExpanded.size === 0) {
+                  setParlaysExpanded(new Set([d.parlays[0].id]));
+                }
+              })
               .catch(() => {});
           }
 
@@ -2050,8 +2059,8 @@ function DashboardContent() {
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                    {parlays.map((parlay: any, parlayIdx: number) => {
-                      const isExpanded = parlaysExpanded.has(parlay.id) || parlayIdx === 0;
+                    {parlays.map((parlay: any) => {
+                      const isExpanded = parlaysExpanded.has(parlay.id);
                       const statusColors: Record<string, string> = {
                         pending: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
                         won: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
@@ -2101,7 +2110,14 @@ function DashboardContent() {
                                     ${Number(parlay.potential_payout).toFixed(2)}
                                   </div>
                                 </div>
-                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-slate-500" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-500" />}
+                                <div
+                                  title={isExpanded ? 'Collapse legs' : 'Expand legs & odds'}
+                                  className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+                                    isExpanded ? 'bg-violet-500/20 text-violet-400' : 'bg-slate-500/20 text-slate-400'
+                                  } hover:bg-violet-500/30`}
+                                >
+                                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                </div>
                               </div>
                             </div>
                             {/* Win probability bar — always visible */}

@@ -271,6 +271,17 @@ export async function POST(req: NextRequest) {
 
     await client.query("COMMIT");
 
+    // Cache the trade price so dashboard can use it immediately for PnL
+    try {
+      await client.query(
+        `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (provider, market_id)
+         DO UPDATE SET last_price = EXCLUDED.last_price, as_of = EXCLUDED.as_of`,
+        [provider, marketId, currentPrice.toString()]
+      );
+    } catch { /* non-critical */ }
+
     // Save market name, external URL, and token_id to market_metadata
     const marketName = body.marketName ? String(body.marketName) : null;
     const externalUrl = body.externalUrl ? String(body.externalUrl) : null;
