@@ -40,30 +40,56 @@ export async function GET(req: NextRequest) {
 
     let subRes;
     try {
-      // First, check for ANY subscription (active or not) to determine account status
-      subRes = await query<SubscriptionRow & { start_balance?: string; status?: string; fail_reason?: string }>(
-        `
-        SELECT 
-          cs.id, 
-          cs.current_balance, 
-          cs.day_start_balance,
-          cs.start_balance,
-          LOWER(TRIM(cs.status)) AS status,
-          cs.fail_reason,
-          COALESCE(cs.phase, 'phase1') AS phase,
-          COALESCE(cs.profit_split_pct, 0) AS profit_split_pct
-        FROM challenge_subscriptions cs
-        WHERE cs.user_id = $1
-        ORDER BY 
-          CASE WHEN LOWER(TRIM(cs.status)) = 'active' THEN 0 ELSE 1 END,
-          cs.started_at DESC
-        LIMIT 1;
-        `,
-        [userId],
-      );
+      try {
+        subRes = await query<SubscriptionRow & { start_balance?: string; status?: string; fail_reason?: string }>(
+          `
+          SELECT 
+            cs.id, 
+            cs.current_balance, 
+            cs.day_start_balance,
+            cs.start_balance,
+            LOWER(TRIM(cs.status)) AS status,
+            cs.fail_reason,
+            COALESCE(cs.phase, 'phase1') AS phase,
+            COALESCE(cs.profit_split_pct, 0) AS profit_split_pct
+          FROM challenge_subscriptions cs
+          WHERE cs.user_id = $1
+          ORDER BY 
+            CASE WHEN LOWER(TRIM(cs.status)) = 'active' THEN 0 ELSE 1 END,
+            cs.started_at DESC
+          LIMIT 1;
+          `,
+          [userId],
+        );
+      } catch (colError: any) {
+        if (colError?.message?.includes('column') || colError?.code === '42703') {
+          console.warn('[Dashboard API] phase/profit_split_pct columns missing, querying without them');
+          subRes = await query<SubscriptionRow & { start_balance?: string; status?: string; fail_reason?: string }>(
+            `
+            SELECT 
+              cs.id, 
+              cs.current_balance, 
+              cs.day_start_balance,
+              cs.start_balance,
+              LOWER(TRIM(cs.status)) AS status,
+              cs.fail_reason,
+              'phase1' AS phase,
+              0 AS profit_split_pct
+            FROM challenge_subscriptions cs
+            WHERE cs.user_id = $1
+            ORDER BY 
+              CASE WHEN LOWER(TRIM(cs.status)) = 'active' THEN 0 ELSE 1 END,
+              cs.started_at DESC
+            LIMIT 1;
+            `,
+            [userId],
+          );
+        } else {
+          throw colError;
+        }
+      }
     } catch (dbError: any) {
       console.error('[Dashboard API] Database query error:', dbError);
-      // Check if it's a connection/timeout error
       if (dbError?.code === '57P01' || 
           dbError?.message?.includes('terminating connection') ||
           dbError?.message?.includes('timeout') ||
@@ -81,7 +107,7 @@ export async function GET(req: NextRequest) {
           { status: 503 }
         );
       }
-      throw dbError; // Re-throw other errors to be caught by outer try-catch
+      throw dbError;
     }
 
     const subscription = subRes.rows[0];

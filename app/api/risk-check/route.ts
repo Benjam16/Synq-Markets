@@ -21,34 +21,52 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const userId = body.userId ? Number(body.userId) : null;
 
-    const subscriptionsRes = await query<{
-      id: number;
-      user_id: number;
-      tier_id: number;
-      start_balance: string;
-      current_balance: string;
-      day_start_balance: string;
-      status: string;
-      phase: string;
-      profit_split_pct: string;
-    }>(
-      userId
-        ? `SELECT id, user_id, tier_id, start_balance, current_balance, day_start_balance,
-                  status,
-                  COALESCE(phase, 'phase1') AS phase,
-                  COALESCE(profit_split_pct, 0) AS profit_split_pct
-           FROM challenge_subscriptions
-           WHERE user_id = $1
-           ORDER BY started_at DESC
-           LIMIT 1`
-        : `SELECT id, user_id, tier_id, start_balance, current_balance, day_start_balance,
-                  status,
-                  COALESCE(phase, 'phase1') AS phase,
-                  COALESCE(profit_split_pct, 0) AS profit_split_pct
-           FROM challenge_subscriptions
-           WHERE status = 'active'`,
-      userId ? [userId] : [],
-    );
+    let subscriptionsRes;
+    const subType = {
+      id: 0, user_id: 0, tier_id: 0,
+      start_balance: '', current_balance: '', day_start_balance: '',
+      status: '', phase: '', profit_split_pct: '',
+    };
+    try {
+      subscriptionsRes = await query<typeof subType>(
+        userId
+          ? `SELECT id, user_id, tier_id, start_balance, current_balance, day_start_balance,
+                    status,
+                    COALESCE(phase, 'phase1') AS phase,
+                    COALESCE(profit_split_pct, 0) AS profit_split_pct
+             FROM challenge_subscriptions
+             WHERE user_id = $1
+             ORDER BY started_at DESC
+             LIMIT 1`
+          : `SELECT id, user_id, tier_id, start_balance, current_balance, day_start_balance,
+                    status,
+                    COALESCE(phase, 'phase1') AS phase,
+                    COALESCE(profit_split_pct, 0) AS profit_split_pct
+             FROM challenge_subscriptions
+             WHERE status = 'active'`,
+        userId ? [userId] : [],
+      );
+    } catch (colError: any) {
+      if (colError?.message?.includes('column') || colError?.code === '42703') {
+        console.warn('[Risk Check] phase/profit_split_pct columns missing, querying without them');
+        subscriptionsRes = await query<typeof subType>(
+          userId
+            ? `SELECT id, user_id, tier_id, start_balance, current_balance, day_start_balance,
+                      status, 'phase1' AS phase, '0' AS profit_split_pct
+               FROM challenge_subscriptions
+               WHERE user_id = $1
+               ORDER BY started_at DESC
+               LIMIT 1`
+            : `SELECT id, user_id, tier_id, start_balance, current_balance, day_start_balance,
+                      status, 'phase1' AS phase, '0' AS profit_split_pct
+               FROM challenge_subscriptions
+               WHERE status = 'active'`,
+          userId ? [userId] : [],
+        );
+      } else {
+        throw colError;
+      }
+    }
 
     const subscriptions = subscriptionsRes.rows;
     const closedAccounts: Array<{ subscriptionId: number; reason: string }> = [];
@@ -149,20 +167,27 @@ export async function POST(req: NextRequest) {
           );
 
           // Create new subscription for the next phase (reset balance)
-          const newSubRes = await client.query<{ id: number }>(
-            `INSERT INTO challenge_subscriptions
-               (user_id, tier_id, status, phase, start_balance, current_balance,
-                day_start_balance, phase_started_at, profit_split_pct)
-             VALUES ($1, $2, 'active', $3, $4, $4, $4, NOW(), $5)
-             RETURNING id`,
-            [
-              sub.user_id,
-              sub.tier_id,
-              nextPhase,
-              startBalance,
-              isFunded ? 80 : 0,
-            ],
-          );
+          let newSubRes;
+          try {
+            newSubRes = await client.query<{ id: number }>(
+              `INSERT INTO challenge_subscriptions
+                 (user_id, tier_id, status, phase, start_balance, current_balance,
+                  day_start_balance, phase_started_at, profit_split_pct)
+               VALUES ($1, $2, 'active', $3, $4, $4, $4, NOW(), $5)
+               RETURNING id`,
+              [sub.user_id, sub.tier_id, nextPhase, startBalance, isFunded ? 80 : 0],
+            );
+          } catch (colErr: any) {
+            if (colErr?.message?.includes('column') || colErr?.code === '42703') {
+              newSubRes = await client.query<{ id: number }>(
+                `INSERT INTO challenge_subscriptions
+                   (user_id, tier_id, status, start_balance, current_balance, day_start_balance)
+                 VALUES ($1, $2, 'active', $3, $3, $3)
+                 RETURNING id`,
+                [sub.user_id, sub.tier_id, startBalance],
+              );
+            } else { throw colErr; }
+          }
 
           const newSubId = newSubRes.rows[0].id;
 
