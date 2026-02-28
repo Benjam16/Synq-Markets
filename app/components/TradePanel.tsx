@@ -424,6 +424,14 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
       const apiEndpoint = tradeType === 'sell' ? '/api/sell' : '/api/buy';
       const provLower = (selectedMarket.provider || 'polymarket').toLowerCase();
 
+      // For Polymarket, ALWAYS use conditionId (Gamma APIs expect condition_id).
+      // For Kalshi, id is usually \"kalshi-{eventTicker}\" while conditionId is event_ticker;
+      // both are understood by getMarketPriceFast via fetchAllMarkets() matching.
+      const marketIdForTrade =
+        provLower === 'polymarket'
+          ? (selectedMarket.conditionId || selectedMarket.id)
+          : (selectedMarket.id || selectedMarket.conditionId);
+
       // Build external URL: Kalshi uses series_ticker only, Polymarket uses event slug
       const extUrl = provLower === 'kalshi'
         ? ((selectedMarket as any).kalshiUrl || (() => {
@@ -441,7 +449,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: userId,
-          marketId: selectedMarket.id || selectedMarket.conditionId,
+          marketId: marketIdForTrade,
           provider: provLower,
           side: side,
           outcome: currentOutcome.name,
@@ -487,7 +495,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
           // Add new position optimistically
           const newPosition = {
             id: data.trade?.id || Date.now(),
-            marketId: selectedMarket.id || selectedMarket.conditionId,
+            marketId: marketIdForTrade,
             provider: (selectedMarket.provider || 'polymarket').toLowerCase(),
             side: side,
             price: currentPrice,
@@ -501,7 +509,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
             if (!prev) return [];
             let remaining = Number(quantity);
             return prev.filter(pos => {
-              if (pos.marketId === (selectedMarket.id || selectedMarket.conditionId) && remaining > 0) {
+              if (pos.marketId === marketIdForTrade && remaining > 0) {
                 const posQty = Number(pos.quantity || 0);
                 if (posQty <= remaining) {
                   remaining -= posQty;

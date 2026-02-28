@@ -183,13 +183,23 @@ export default function MarketsPage() {
     };
   }, []);
 
-  // ── Fast markets polling (15s refresh when Fast tab is active) ──────────
+  // ── Fast markets polling (aggressive refresh for low-latency pricing) ───
   useEffect(() => {
     let mounted = true;
+    let controller: AbortController | null = null;
+
     const load = async () => {
+      if (!mounted) return;
+      if (controller) {
+        controller.abort();
+      }
+      controller = new AbortController();
       setFastMarketsLoading(true);
       try {
-        const res = await fetch(`/api/markets/fast?_t=${Date.now()}`, { cache: 'no-store' });
+        const res = await fetch(`/api/markets/fast?_t=${Date.now()}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
         if (res.ok && mounted) {
           const data = await res.json();
           setFastMarkets(data.markets || []);
@@ -199,8 +209,13 @@ export default function MarketsPage() {
       }
     };
     load();
-    const id = setInterval(load, 15_000); // refresh every 15s
-    return () => { mounted = false; clearInterval(id); };
+    // Fast markets: refresh every ~2 seconds for near real-time prices
+    const id = setInterval(load, 2_000);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+      if (controller) controller.abort();
+    };
   }, []);
 
   // ── Live clock for countdown timers (every second when Fast tab open) ──
