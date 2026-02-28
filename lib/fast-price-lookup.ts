@@ -2,6 +2,11 @@
  * Fast market price lookup - optimized for trade execution
  * Checks database cache first, then falls back to batch market fetch,
  * then direct API. Returns null if no real price can be found.
+ *
+ * KEY FIX: For Kalshi, terminal trades use market-level tickers
+ * (e.g. "KXBTCD-28FEB2603-T61999.99") but UnifiedMarket stores event-level
+ * IDs (e.g. "kalshi-KXBTCD-28FEB26"). We now search OUTCOMES by tokenId
+ * so these always match.
  */
 import { query } from "@/lib/db";
 import { fetchAllMarkets } from "@/lib/market-fetchers";
@@ -14,12 +19,31 @@ export interface PriceLookupResult {
   market?: any;
 }
 
+// ── Global In-Memory Price Cache ──
+// Warm cache populated by terminal feed trades and batch lookups.
+// Used for instant price display when a user expands a trade row.
+const _memCache = new Map<string, { yesPrice: number; noPrice: number; ts: number }>();
+const MEM_CACHE_TTL = 60_000; // 60 seconds
+
+export function warmPriceCache(provider: string, marketId: string, yesPrice: number) {
+  const key = `${provider.toLowerCase()}:${marketId}`;
+  _memCache.set(key, { yesPrice, noPrice: 1 - yesPrice, ts: Date.now() });
+  if (_memCache.size > 5000) {
+    const oldest = [..._memCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+    oldest.slice(0, 1000).forEach(([k]) => _memCache.delete(k));
+  }
+}
+
+export function getCachedPrice(provider: string, marketId: string): { yesPrice: number; noPrice: number } | null {
+  const key = `${provider.toLowerCase()}:${marketId}`;
+  const hit = _memCache.get(key);
+  if (hit && Date.now() - hit.ts < MEM_CACHE_TTL) return hit;
+  return null;
+}
+
 /**
  * Fast price lookup for a single market.
- * Priority: Cache > Entry Price > fetchAllMarkets (batch, outcome-aware) > Direct API > null
- *
- * Returns null when no real price can be resolved — callers must handle this
- * by rejecting the trade or showing "Price Stale" in the UI.
+ * Priority: In-Memory Cache > DB Cache > fetchAllMarkets (outcome-aware) > Direct API > null
  */
 export async function getMarketPriceFast(
   provider: string,
@@ -31,8 +55,19 @@ export async function getMarketPriceFast(
   tokenId?: string
 ): Promise<PriceLookupResult | null> {
   const normalizedProvider = provider.toLowerCase();
+
+  // STEP 0: In-memory cache (instant, <1ms)
+  const memHit = getCachedPrice(normalizedProvider, marketId);
+  if (memHit) {
+    return {
+      price: side === 'no' ? memHit.noPrice : memHit.yesPrice,
+      yesPrice: memHit.yesPrice,
+      noPrice: memHit.noPrice,
+      source: 'cache',
+    };
+  }
   
-  // STEP 1: Try database cache first (fastest - <10ms)
+  // STEP 1: Try database cache (fastest DB - <10ms)
   try {
     const cacheRes = await query<{ last_price: string }>(
       `
@@ -50,6 +85,7 @@ export async function getMarketPriceFast(
       const cachedPrice = Number(cacheRes.rows[0].last_price);
       const yesPrice = cachedPrice;
       const noPrice = 1 - cachedPrice;
+      warmPriceCache(normalizedProvider, marketId, yesPrice);
       
       return {
         price: side === 'no' ? noPrice : yesPrice,
@@ -62,35 +98,50 @@ export async function getMarketPriceFast(
     console.warn('[Fast Price] Cache lookup failed:', error);
   }
 
-  // STEP 2: Use entry price if provided (very fast - 0ms, no API call)
-  if (entryPrice !== undefined && entryPrice > 0) {
-    const yesPrice = entryPrice;
-    const noPrice = 1 - entryPrice;
-    
-    return {
-      price: side === 'no' ? noPrice : yesPrice,
-      yesPrice,
-      noPrice,
-      source: 'entry',
-    };
-  }
-
-  // STEP 3: Batch fetch from fetchAllMarkets (same source as Markets tab — 500 limit)
+  // STEP 2: Batch fetch from fetchAllMarkets (same source as Markets tab)
   try {
     const allMarkets = await fetchAllMarkets(500);
-    const market = allMarkets.find(m => 
+
+    // 2a: Direct market-level matching
+    let market = allMarkets.find(m => 
       m.id === marketId || 
       m.conditionId === marketId ||
       m.id.endsWith(marketId) ||
       marketId.endsWith(m.id)
     );
 
+    // 2b: If no market-level match, search ALL outcomes across ALL markets
+    // This is the critical fix for Kalshi terminal trades where the marketId
+    // is a market-level ticker but UnifiedMarket uses event-level IDs.
+    let outcomeMatch: any = null;
+    if (!market) {
+      const searchId = (tokenId || marketId).toLowerCase();
+      for (const m of allMarkets) {
+        if (!m.outcomes || m.outcomes.length === 0) continue;
+        const oc = m.outcomes.find((o: any) =>
+          (o.tokenId || '').toLowerCase() === searchId ||
+          (o.id || '').toLowerCase() === searchId ||
+          (o.clobTokenId || '').toLowerCase() === searchId
+        );
+        if (oc && oc.price != null && oc.price > 0) {
+          market = m;
+          outcomeMatch = oc;
+          break;
+        }
+      }
+    }
+
     if (market) {
       let price = market.price ?? 0;
       let yesPrice = price;
       let noPrice = 1 - price;
 
-      if (market.outcomes && market.outcomes.length > 0) {
+      // If we already found an outcome match from the cross-market search, use it
+      if (outcomeMatch) {
+        yesPrice = outcomeMatch.price;
+        noPrice = 1 - yesPrice;
+        price = side === 'no' ? noPrice : yesPrice;
+      } else if (market.outcomes && market.outcomes.length > 0) {
         let matched = false;
 
         // Try outcomeIndex first (most precise)
@@ -104,12 +155,13 @@ export async function getMarketPriceFast(
           }
         }
 
-        // Try tokenId match
-        if (!matched && tokenId) {
-          const tokenLower = tokenId.toLowerCase();
+        // Try tokenId match within this market's outcomes
+        if (!matched && (tokenId || marketId)) {
+          const searchToken = (tokenId || marketId).toLowerCase();
           const oc = market.outcomes.find((o: any) =>
-            (o.tokenId || '').toLowerCase() === tokenLower ||
-            (o.clobTokenId || '').toLowerCase() === tokenLower
+            (o.tokenId || '').toLowerCase() === searchToken ||
+            (o.id || '').toLowerCase() === searchToken ||
+            (o.clobTokenId || '').toLowerCase() === searchToken
           );
           if (oc && oc.price != null && oc.price > 0) {
             yesPrice = oc.price;
@@ -141,7 +193,8 @@ export async function getMarketPriceFast(
         price = side === 'no' ? noPrice : yesPrice;
       }
 
-      // Update cache in background
+      // Update both caches
+      warmPriceCache(normalizedProvider, marketId, yesPrice);
       query(
         `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
          VALUES ($1, $2, $3, NOW())
@@ -161,20 +214,45 @@ export async function getMarketPriceFast(
     console.error('[Fast Price] fetchAllMarkets failed:', error);
   }
 
-  // STEP 4: Direct single-market API fetch (outcome-aware)
+  // STEP 3: Direct single-market API fetch (with auth for Kalshi)
   try {
     if (normalizedProvider === 'kalshi') {
       const cleanTicker = marketId.replace(/^kalshi-/i, '');
+      const accessKey = process.env.KALSHI_ACCESS_KEY;
+      const privateKey = process.env.KALSHI_PRIVATE_KEY;
+
+      let headers: Record<string, string> = { 'Accept': 'application/json' };
+      if (accessKey && privateKey) {
+        try {
+          const { generateKalshiHeaders } = await import('./kalshi-auth');
+          const path = `/trade-api/v2/markets/${cleanTicker}`;
+          const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
+          headers = { ...headers, ...authHeaders };
+        } catch { /* proceed without auth */ }
+      }
+
       const res = await fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${cleanTicker}`, {
+        headers,
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
         const data = await res.json();
         const m = data.market || data;
-        const raw = m.yes_ask ?? m.yes_bid ?? m.last_price;
-        if (raw != null) {
-          const yp = Number(raw) <= 1 ? Number(raw) : Number(raw) / 100;
+        // Prefer order book mid-price (avg of best bid and ask) for accuracy
+        let yp: number | null = null;
+        const yesBid = m.yes_bid != null ? Number(m.yes_bid) : null;
+        const yesAsk = m.yes_ask != null ? Number(m.yes_ask) : null;
+        if (yesBid != null && yesAsk != null && yesBid > 0 && yesAsk > 0) {
+          const bidNorm = yesBid <= 1 ? yesBid : yesBid / 100;
+          const askNorm = yesAsk <= 1 ? yesAsk : yesAsk / 100;
+          yp = (bidNorm + askNorm) / 2;
+        } else {
+          const raw = yesAsk ?? yesBid ?? m.last_price;
+          if (raw != null) yp = Number(raw) <= 1 ? Number(raw) : Number(raw) / 100;
+        }
+        if (yp != null && yp > 0 && yp < 1) {
           const np = 1 - yp;
+          warmPriceCache(normalizedProvider, marketId, yp);
           query(
             `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
              VALUES ($1, $2, $3, NOW())
@@ -195,7 +273,6 @@ export async function getMarketPriceFast(
         const m = Array.isArray(data) ? data[0] : data;
         if (m?.outcomePrices) {
           const prices = JSON.parse(m.outcomePrices);
-          // Use outcomeIndex if available, otherwise try matching tokenId via clobTokenIds
           let priceIdx = 0;
           if (outcomeIndex !== undefined && outcomeIndex >= 0 && outcomeIndex < prices.length) {
             priceIdx = outcomeIndex;
@@ -210,6 +287,7 @@ export async function getMarketPriceFast(
           const yp = parseFloat(prices[priceIdx]);
           if (!isNaN(yp) && yp > 0 && yp < 1) {
             const np = 1 - yp;
+            warmPriceCache(normalizedProvider, marketId, yp);
             query(
               `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
                VALUES ($1, $2, $3, NOW())
@@ -225,7 +303,7 @@ export async function getMarketPriceFast(
     // Direct API also failed
   }
 
-  // STEP 5: No real price available — return null instead of 0.50
+  // STEP 4: No real price available — return null instead of 0.50
   console.warn(`[Fast Price] All lookups failed for ${normalizedProvider}:${marketId} — returning null (no 0.50 fallback)`);
   return null;
 }

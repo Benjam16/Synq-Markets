@@ -136,11 +136,12 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Calculate combined multiplier with house edge (40% vig per leg to prevent outsized payouts)
-    const combinedMultiplier = legs.reduce((acc, leg) => {
-      const adjustedPrice = leg.price + (1 - leg.price) * 0.40;
-      return acc * (1 / adjustedPrice);
+    // Calculate combined multiplier with institutional house edge
+    // Raw multiplier is divided by 5 to prevent outsized payouts (risk management)
+    const rawMultiplier = legs.reduce((acc, leg) => {
+      return acc * (1 / leg.price);
     }, 1);
+    const combinedMultiplier = Math.max(1.1, rawMultiplier / 5);
     const potentialPayout = +(stake * combinedMultiplier).toFixed(2);
 
     // Set all legs as pending

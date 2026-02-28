@@ -507,11 +507,12 @@ export default function TerminalPage() {
       if (res.ok && !data.error) {
         setInstantTradeSuccess(tradeId);
         playClick();
+        const executedPrice = data.priceUsed || trade.price;
         toast(
           (t) => (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <span style={{ fontWeight: 600 }}>
-                ⚡ {quantity} {trade.side} @ {(trade.price * 100).toFixed(1)}¢
+                ⚡ {quantity} {trade.side} @ {(executedPrice * 100).toFixed(1)}¢
               </span>
               <span style={{ fontSize: '12px', opacity: 0.8 }}>{trade.marketName}</span>
               <button

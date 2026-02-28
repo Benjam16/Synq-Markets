@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { Position, Tier } from "@/lib/types";
 import { fetchAllMarkets } from "@/lib/market-fetchers";
+import { generateKalshiHeaders } from "@/lib/kalshi-auth";
 
 export const dynamic = 'force-dynamic';
 
@@ -320,16 +321,36 @@ export async function GET(req: NextRequest) {
             const liveMarkets = await fetchAllMarkets(500);
             for (const mk of missingKeys) {
               const key = `${mk.provider}:${mk.market_id}`;
-              const found = liveMarkets.find(m =>
+              // Try market-level matching first
+              let found = liveMarkets.find(m =>
                 m.id === mk.market_id ||
                 m.conditionId === mk.market_id ||
                 m.id.endsWith(mk.market_id) ||
                 mk.market_id.endsWith(m.id)
               );
-              if (found && found.price > 0 && found.price < 1) {
-                priceMap.set(key, found.price);
-                yesPriceMap.set(key, found.price);
-                noPriceMap.set(key, 1 - found.price);
+              let foundPrice = found?.price ?? 0;
+
+              // If no market-level match, search ALL outcomes (fixes Kalshi tickers)
+              if (!found || foundPrice <= 0) {
+                const searchId = mk.market_id.toLowerCase();
+                for (const m of liveMarkets) {
+                  if (!m.outcomes || m.outcomes.length === 0) continue;
+                  const oc = (m.outcomes as any[]).find((o: any) =>
+                    (o.tokenId || '').toLowerCase() === searchId ||
+                    (o.id || '').toLowerCase() === searchId
+                  );
+                  if (oc && oc.price > 0 && oc.price < 1) {
+                    found = m;
+                    foundPrice = oc.price;
+                    break;
+                  }
+                }
+              }
+
+              if (found && foundPrice > 0 && foundPrice < 1) {
+                priceMap.set(key, foundPrice);
+                yesPriceMap.set(key, foundPrice);
+                noPriceMap.set(key, 1 - foundPrice);
                 cachedKeys.add(key);
               }
             }
@@ -350,21 +371,40 @@ export async function GET(req: NextRequest) {
               const prov = (t.provider || '').toLowerCase();
               if (prov === 'kalshi') {
                 const ticker = t.market_id.replace(/^kalshi-/i, '');
+                const kalshiAccessKey = process.env.KALSHI_ACCESS_KEY;
+                const kalshiPrivateKey = process.env.KALSHI_PRIVATE_KEY;
+                let kalshiHeaders: Record<string, string> = { 'Accept': 'application/json' };
+                if (kalshiAccessKey && kalshiPrivateKey) {
+                  try {
+                    const apiPath = `/trade-api/v2/markets/${ticker}`;
+                    const authH = generateKalshiHeaders('GET', apiPath, kalshiAccessKey, kalshiPrivateKey);
+                    kalshiHeaders = { ...kalshiHeaders, ...authH };
+                  } catch { /* proceed without auth */ }
+                }
                 const r = await fetch(
                   `https://api.elections.kalshi.com/trade-api/v2/markets/${ticker}`,
-                  { signal: AbortSignal.timeout(4000) }
+                  { headers: kalshiHeaders, signal: AbortSignal.timeout(4000) }
                 );
                 if (r.ok) {
                   const d = await r.json();
                   const mk = d.market || d;
-                  const raw = mk.yes_ask ?? mk.yes_bid ?? mk.last_price;
-                  if (raw != null) {
-                    const yp = Number(raw) <= 1 ? Number(raw) : Number(raw) / 100;
+                  // Prefer order book mid-price for PnL accuracy
+                  let yp: number | null = null;
+                  const yesBid = mk.yes_bid != null ? Number(mk.yes_bid) : null;
+                  const yesAsk = mk.yes_ask != null ? Number(mk.yes_ask) : null;
+                  if (yesBid != null && yesAsk != null && yesBid > 0 && yesAsk > 0) {
+                    const bidN = yesBid <= 1 ? yesBid : yesBid / 100;
+                    const askN = yesAsk <= 1 ? yesAsk : yesAsk / 100;
+                    yp = (bidN + askN) / 2;
+                  } else {
+                    const raw = yesAsk ?? yesBid ?? mk.last_price;
+                    if (raw != null) yp = Number(raw) <= 1 ? Number(raw) : Number(raw) / 100;
+                  }
+                  if (yp != null && yp > 0 && yp < 1) {
                     priceMap.set(key, yp);
                     yesPriceMap.set(key, yp);
                     noPriceMap.set(key, 1 - yp);
                     cachedKeys.add(key);
-                    // Write to cache for next time
                     query(
                       `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
                        VALUES ($1, $2, $3, NOW())
