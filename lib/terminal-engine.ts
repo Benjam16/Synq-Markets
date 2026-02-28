@@ -373,7 +373,8 @@ const TRADE_CACHE_MAX = 500;
 const WHALE_CACHE_MAX = 50;
 const MARKET_TICK_MAX = 200;
 const CACHE_TTL = 3000;
-const POLYMARKET_CLOB_BASE = 'https://clob.polymarket.com';
+// Public Polymarket Data API (no auth required) for recent trades
+const POLYMARKET_DATA_BASE = 'https://data-api.polymarket.com';
 const KALSHI_API_BASE = 'https://api.elections.kalshi.com';
 
 // Category diversity: crypto trades capped at this % of the feed
@@ -404,7 +405,8 @@ const ANON_RE = /\b(Person|Player|Company|Team|Candidate|Entity)\s+[A-Z]\b/i;
 
 async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
   try {
-    const res = await fetch(`${POLYMARKET_CLOB_BASE}/trades?limit=50`, {
+    // Public trades feed (taker fills only) — no API key required
+    const res = await fetch(`${POLYMARKET_DATA_BASE}/trades?limit=50&takerOnly=true`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
       cache: 'no-store',
@@ -423,20 +425,33 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
     await ensureMarketInfoMap();
 
     const trades = rawTrades.slice(0, 50).map((t: any, idx: number) => {
+      // Data API shape:
+      // {
+      //   side: 'BUY' | 'SELL',
+      //   outcome: 'Yes' | 'No',
+      //   price: 0-1,
+      //   size: number,
+      //   conditionId: string,
+      //   asset: string,        // specific outcome token id
+      //   title: string,
+      //   slug: string,
+      //   eventSlug: string,
+      //   timestamp: unixSeconds
+      // }
       const outcomeRaw = (t.outcome || '').toLowerCase();
-      const directionRaw = (t.side || '').toLowerCase();
+      const sideRaw = (t.side || '').toLowerCase(); // BUY / SELL
 
       let displaySide: 'Yes' | 'No';
       let displayPrice: number;
-      const rawPrice = parseFloat(t.price || t.avg_price || '0.5');
+      const rawPrice = parseFloat(String(t.price ?? '0.5'));
 
       if (outcomeRaw === 'yes' || outcomeRaw === 'no') {
         displaySide = outcomeRaw === 'yes' ? 'Yes' : 'No';
         displayPrice = rawPrice;
-      } else if (directionRaw === 'buy') {
+      } else if (sideRaw === 'buy') {
         displaySide = rawPrice <= 0.5 ? 'Yes' : 'No';
         displayPrice = rawPrice;
-      } else if (directionRaw === 'sell') {
+      } else if (sideRaw === 'sell') {
         displaySide = 'No';
         displayPrice = 1 - rawPrice;
       } else {
@@ -444,10 +459,10 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         displayPrice = rawPrice;
       }
 
-      const shares = parseInt(t.size || t.amount || t.count || '10');
+      const shares = Number(t.size || t.amount || t.count || 10);
       const notional = displayPrice * shares;
-      const tradeSlug = t.market_slug || '';
-      const conditionId = t.market || t.asset_id || t.condition_id || '';
+      const tradeSlug = t.slug || t.eventSlug || '';
+      const conditionId = t.conditionId || '';
 
       const resolvedInfo = resolveMarketInfo(conditionId);
       let rawName = resolvedInfo?.name
@@ -463,7 +478,9 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
             ? `https://polymarket.com/event/${tradeSlug}`
             : 'https://polymarket.com');
 
-      const assetId = t.asset_id || '';
+      const assetId = t.asset || t.asset_id || '';
+      const timestampSec = Number(t.timestamp || 0);
+      const isoTs = timestampSec > 0 ? new Date(timestampSec * 1000).toISOString() : new Date().toISOString();
 
       return {
         id: `poly-${t.id || `${Date.now()}-${idx}`}`,
@@ -476,9 +493,9 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         priceCents: `${(displayPrice * 100).toFixed(1)}¢`,
         shares,
         notional,
-        fee: parseFloat(t.fee || '0') || Math.round(notional * 0.02 * 100) / 100,
-        timestamp: t.created_at || t.timestamp || new Date().toISOString(),
-        walletAddress: t.maker_address || t.taker_address || t.owner,
+        fee: 0,
+        timestamp: isoTs,
+        walletAddress: t.proxyWallet || t.maker_address || t.taker_address || t.owner,
         isWhale: notional >= WHALE_THRESHOLD,
         externalUrl,
         slug: tradeSlug,
