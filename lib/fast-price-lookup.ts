@@ -1,12 +1,12 @@
 /**
  * Fast market price lookup - optimized for trade execution
- * Checks database cache first, then falls back to entry price
- * Only fetches from API as last resort
+ * Checks database cache first, then falls back to batch market fetch,
+ * then direct API. Returns null if no real price can be found.
  */
 import { query } from "@/lib/db";
 import { fetchAllMarkets } from "@/lib/market-fetchers";
 
-interface PriceLookupResult {
+export interface PriceLookupResult {
   price: number;
   yesPrice?: number;
   noPrice?: number;
@@ -15,16 +15,21 @@ interface PriceLookupResult {
 }
 
 /**
- * Fast price lookup for a single market
- * Priority: Cache > Entry Price > API (only if needed)
+ * Fast price lookup for a single market.
+ * Priority: Cache > Entry Price > fetchAllMarkets (batch, outcome-aware) > Direct API > null
+ *
+ * Returns null when no real price can be resolved — callers must handle this
+ * by rejecting the trade or showing "Price Stale" in the UI.
  */
 export async function getMarketPriceFast(
   provider: string,
   marketId: string,
   side: 'yes' | 'no',
   outcome?: string,
-  entryPrice?: number
-): Promise<PriceLookupResult> {
+  entryPrice?: number,
+  outcomeIndex?: number,
+  tokenId?: string
+): Promise<PriceLookupResult | null> {
   const normalizedProvider = provider.toLowerCase();
   
   // STEP 1: Try database cache first (fastest - <10ms)
@@ -54,12 +59,10 @@ export async function getMarketPriceFast(
       };
     }
   } catch (error) {
-    // Cache lookup failed, continue to next step
     console.warn('[Fast Price] Cache lookup failed:', error);
   }
 
   // STEP 2: Use entry price if provided (very fast - 0ms, no API call)
-  // This is safe because prices don't change dramatically in seconds
   if (entryPrice !== undefined && entryPrice > 0) {
     const yesPrice = entryPrice;
     const noPrice = 1 - entryPrice;
@@ -72,10 +75,9 @@ export async function getMarketPriceFast(
     };
   }
 
-  // STEP 3: Fetch from API (slowest - 2-5 seconds, but accurate)
-  // Only do this if we have no cache and no entry price
+  // STEP 3: Batch fetch from fetchAllMarkets (same source as Markets tab — 500 limit)
   try {
-    const allMarkets = await fetchAllMarkets(100);
+    const allMarkets = await fetchAllMarkets(500);
     const market = allMarkets.find(m => 
       m.id === marketId || 
       m.conditionId === marketId ||
@@ -84,39 +86,68 @@ export async function getMarketPriceFast(
     );
 
     if (market) {
-      // Use outcome-specific price if available
       let price = market.price ?? 0;
-      // UnifiedMarket uses 'price' for primary outcome, calculate noPrice from it
       let yesPrice = price;
       let noPrice = 1 - price;
 
-      if (outcome && market.outcomes && market.outcomes.length > 0) {
-        const outcomeName = outcome.replace(/\s*\(No\)\s*$/i, '').trim();
-        const targetOutcome = market.outcomes.find((o: any) => 
-          o.name === outcomeName || 
-          o.name.replace(/\s*\(No\)\s*$/i, '') === outcomeName
-        );
-        
-        if (targetOutcome) {
-          if (side === 'no') {
-            price = 1 - (targetOutcome.price || 0);
-          } else {
-            price = targetOutcome.price || 0;
+      if (market.outcomes && market.outcomes.length > 0) {
+        let matched = false;
+
+        // Try outcomeIndex first (most precise)
+        if (outcomeIndex !== undefined && outcomeIndex >= 0 && outcomeIndex < market.outcomes.length) {
+          const oc = market.outcomes[outcomeIndex];
+          if (oc && oc.price != null && oc.price > 0) {
+            yesPrice = oc.price;
+            noPrice = 1 - yesPrice;
+            price = side === 'no' ? noPrice : yesPrice;
+            matched = true;
           }
-        } else {
+        }
+
+        // Try tokenId match
+        if (!matched && tokenId) {
+          const tokenLower = tokenId.toLowerCase();
+          const oc = market.outcomes.find((o: any) =>
+            (o.tokenId || '').toLowerCase() === tokenLower ||
+            (o.clobTokenId || '').toLowerCase() === tokenLower
+          );
+          if (oc && oc.price != null && oc.price > 0) {
+            yesPrice = oc.price;
+            noPrice = 1 - yesPrice;
+            price = side === 'no' ? noPrice : yesPrice;
+            matched = true;
+          }
+        }
+
+        // Try outcome name match
+        if (!matched && outcome) {
+          const outcomeName = outcome.replace(/\s*\(No\)\s*$/i, '').trim();
+          const targetOutcome = market.outcomes.find((o: any) => 
+            o.name === outcomeName || 
+            o.name?.replace(/\s*\(No\)\s*$/i, '') === outcomeName
+          );
+          if (targetOutcome && targetOutcome.price != null && targetOutcome.price > 0) {
+            yesPrice = targetOutcome.price;
+            noPrice = 1 - yesPrice;
+            price = side === 'no' ? noPrice : yesPrice;
+            matched = true;
+          }
+        }
+
+        if (!matched) {
           price = side === 'no' ? noPrice : yesPrice;
         }
       } else {
         price = side === 'no' ? noPrice : yesPrice;
       }
 
-      // Update cache in background (don't wait)
+      // Update cache in background
       query(
         `INSERT INTO market_price_cache (provider, market_id, last_price, as_of)
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (provider, market_id) DO UPDATE SET last_price = EXCLUDED.last_price, as_of = EXCLUDED.as_of;`,
         [normalizedProvider, marketId, yesPrice.toString()]
-      ).catch(() => {}); // Silently fail - cache update is not critical
+      ).catch(() => {});
 
       return {
         price,
@@ -127,10 +158,10 @@ export async function getMarketPriceFast(
       };
     }
   } catch (error) {
-    console.error('[Fast Price] API fetch failed:', error);
+    console.error('[Fast Price] fetchAllMarkets failed:', error);
   }
 
-  // STEP 4: Direct single-market API fetch (more reliable than fetchAllMarkets for unknown markets)
+  // STEP 4: Direct single-market API fetch (outcome-aware)
   try {
     if (normalizedProvider === 'kalshi') {
       const cleanTicker = marketId.replace(/^kalshi-/i, '');
@@ -154,7 +185,7 @@ export async function getMarketPriceFast(
         }
       }
     } else {
-      // Polymarket: try Gamma API by condition_id
+      // Polymarket: try Gamma API by condition_id, use outcomeIndex for correct price
       const res = await fetch(
         `https://gamma-api.polymarket.com/markets?condition_id=${marketId}&limit=1`,
         { signal: AbortSignal.timeout(5000) },
@@ -164,7 +195,19 @@ export async function getMarketPriceFast(
         const m = Array.isArray(data) ? data[0] : data;
         if (m?.outcomePrices) {
           const prices = JSON.parse(m.outcomePrices);
-          const yp = parseFloat(prices[0]);
+          // Use outcomeIndex if available, otherwise try matching tokenId via clobTokenIds
+          let priceIdx = 0;
+          if (outcomeIndex !== undefined && outcomeIndex >= 0 && outcomeIndex < prices.length) {
+            priceIdx = outcomeIndex;
+          } else if (tokenId && m.clobTokenIds) {
+            try {
+              const clobIds = JSON.parse(m.clobTokenIds);
+              const foundIdx = clobIds.indexOf(tokenId);
+              if (foundIdx >= 0 && foundIdx < prices.length) priceIdx = foundIdx;
+            } catch { /* ignore */ }
+          }
+
+          const yp = parseFloat(prices[priceIdx]);
           if (!isNaN(yp) && yp > 0 && yp < 1) {
             const np = 1 - yp;
             query(
@@ -182,12 +225,7 @@ export async function getMarketPriceFast(
     // Direct API also failed
   }
 
-  // STEP 5: Last resort - return 0.5 if everything fails
-  console.warn(`[Fast Price] All lookups failed for ${normalizedProvider}:${marketId}, using 0.50 fallback`);
-  return {
-    price: 0.5,
-    yesPrice: 0.5,
-    noPrice: 0.5,
-    source: 'entry',
-  };
+  // STEP 5: No real price available — return null instead of 0.50
+  console.warn(`[Fast Price] All lookups failed for ${normalizedProvider}:${marketId} — returning null (no 0.50 fallback)`);
+  return null;
 }

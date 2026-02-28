@@ -74,6 +74,8 @@ interface TerminalTrade {
   slug?: string;
   category?: string;
   imageUrl?: string;
+  outcomeIndex?: number;
+  tokenId?: string;
 }
 
 interface WhaleAlert {
@@ -486,6 +488,8 @@ export default function TerminalPage() {
           marketName: trade.marketName,
           category: ('category' in trade ? (trade as TerminalTrade).category : '') || 'General',
           externalUrl: extUrl || undefined,
+          outcomeIndex: ('outcomeIndex' in trade ? (trade as TerminalTrade).outcomeIndex : undefined),
+          tokenId: ('tokenId' in trade ? (trade as TerminalTrade).tokenId : undefined),
         }),
       });
 
@@ -637,6 +641,8 @@ export default function TerminalPage() {
       slug: ('slug' in trade ? (trade as TerminalTrade).slug : ''),
       category: ('category' in trade ? (trade as TerminalTrade).category : ''),
       imageUrl: ('imageUrl' in trade ? (trade as TerminalTrade).imageUrl : ''),
+      outcomeIndex: ('outcomeIndex' in trade ? (trade as TerminalTrade).outcomeIndex : undefined),
+      tokenId: ('tokenId' in trade ? (trade as TerminalTrade).tokenId : undefined),
     };
     setChartTrade(chartData);
   }, []);

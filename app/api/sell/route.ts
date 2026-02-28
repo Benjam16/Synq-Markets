@@ -113,12 +113,19 @@ export async function POST(req: NextRequest) {
         marketId,
         positionSide,
         positionOutcome || undefined,
-        entryPrice // Use entry price as fallback (very fast)
+        entryPrice
       );
-      
+
+      if (!priceResult) {
+        await client.query("ROLLBACK");
+        return NextResponse.json(
+          { error: "Live price unavailable for this market." },
+          { status: 422 },
+        );
+      }
+
       currentPrice = priceResult.price;
-      
-      // Log price source for debugging
+
       if (priceResult.source === 'api') {
         console.log(`[Sell] Price from API for ${provider}:${marketId} (slow)`);
       } else {

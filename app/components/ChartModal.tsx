@@ -33,6 +33,8 @@ interface ChartTrade {
   slug?: string;
   category?: string;
   imageUrl?: string;
+  outcomeIndex?: number;
+  tokenId?: string;
 }
 
 interface OrderBookEntry {
@@ -121,12 +123,12 @@ export default function ChartModal({
   useEffect(() => {
     initialPriceRef.current = trade.price;
     setLivePrice(null);
-    // Fetch real current price from provider API
     const fetchLivePrice = async () => {
       try {
         const prov = (trade.provider || '').toLowerCase();
         if (prov === 'kalshi') {
-          const ticker = (trade.marketId || '').replace(/^kalshi-/i, '');
+          // Kalshi ticker IS the outcome-level identifier
+          const ticker = (trade.tokenId || trade.marketId || '').replace(/^kalshi-/i, '');
           const r = await fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${ticker}`);
           if (r.ok) {
             const d = await r.json();
@@ -146,7 +148,18 @@ export default function ChartModal({
             const mk = Array.isArray(d) ? d[0] : d;
             if (mk?.outcomePrices) {
               const prices = JSON.parse(mk.outcomePrices);
-              const yp = parseFloat(prices[0]);
+              // Use outcomeIndex for the correct sub-outcome, or match tokenId via clobTokenIds
+              let priceIdx = 0;
+              if (trade.outcomeIndex != null && trade.outcomeIndex >= 0 && trade.outcomeIndex < prices.length) {
+                priceIdx = trade.outcomeIndex;
+              } else if (trade.tokenId && mk.clobTokenIds) {
+                try {
+                  const clobIds = JSON.parse(mk.clobTokenIds);
+                  const found = clobIds.indexOf(trade.tokenId);
+                  if (found >= 0 && found < prices.length) priceIdx = found;
+                } catch { /* ignore */ }
+              }
+              const yp = parseFloat(prices[priceIdx]);
               if (!isNaN(yp) && yp > 0 && yp < 1) {
                 setLivePrice(yp);
               }
@@ -158,7 +171,7 @@ export default function ChartModal({
       }
     };
     fetchLivePrice();
-  }, [trade.marketId, trade.provider, trade.price]);
+  }, [trade.marketId, trade.provider, trade.price, trade.outcomeIndex, trade.tokenId]);
 
   // ── Candlestick data ──
   const candlestickData = useMemo(() => {

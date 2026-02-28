@@ -63,6 +63,10 @@ export async function GET(req: NextRequest) {
           Number(order.stop_price),
         );
 
+        if (!priceResult) {
+          console.log(`[Stop-Loss] Skipping order ${order.id}: price unavailable`);
+          continue;
+        }
         const currentPrice = priceResult.price;
         const stopPrice = Number(order.stop_price);
 

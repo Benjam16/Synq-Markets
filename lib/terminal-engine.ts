@@ -23,6 +23,8 @@ interface MarketInfo {
   externalUrl: string;
   category: string;
   imageUrl?: string;
+  tokenId?: string;
+  outcomeIndex?: number;
 }
 
 let _marketInfoMap: Map<string, MarketInfo> = new Map();
@@ -104,11 +106,10 @@ async function ensureMarketInfoMap(): Promise<void> {
           if (seriesTicker) m.set(seriesTicker.toLowerCase(), info);
 
           // Index by EACH nested market ticker (what the trades API returns)
-          // Use market-specific title so the terminal shows the specific bet,
-          // e.g. "$65,750 to $65,999.99 – Bitcoin price range on Feb 27..."
           for (const mkt of (event.markets || [])) {
+            // Skip settled/closed Kalshi sub-markets
+            if (mkt.status === 'settled' || mkt.status === 'closed') continue;
             if (mkt.ticker) {
-              // Clean Kalshi's raw `::` / `--` prefix from subtitle fields
               const rawTitle = mkt.title || mkt.subtitle || mkt.yes_sub_title || '';
               let mktTitle = rawTitle.replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim();
 
@@ -184,6 +185,7 @@ async function ensureMarketInfoMap(): Promise<void> {
               if (eventTicker) m.set(eventTicker.toLowerCase(), info);
               if (seriesTicker) m.set(seriesTicker.toLowerCase(), info);
               for (const mkt of (event.markets || [])) {
+                if (mkt.status === 'settled' || mkt.status === 'closed') continue;
                 if (mkt.ticker) {
                   const rawTitle = mkt.title || mkt.subtitle || mkt.yes_sub_title || '';
                   let mktTitle = rawTitle.replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim();
@@ -235,10 +237,12 @@ async function ensureMarketInfoMap(): Promise<void> {
         // Use market-specific question when it has real names;
         // fall back to event title when the question is anonymized
         const ANON_PATTERN = /\b(Person|Player|Company|Team|Candidate|Entity)\s+[A-Z]\b/i;
-        for (const mkt of (event.markets || [])) {
+        for (let mktIdx = 0; mktIdx < (event.markets || []).length; mktIdx++) {
+          const mkt = event.markets[mktIdx];
+          // Skip closed/resolved individual markets
+          if (mkt.closed === true || mkt.active === false) continue;
           const mktQuestion = mkt.question || '';
           const isAnonymized = ANON_PATTERN.test(mktQuestion);
-          // Build best name: specific question > "GroupItem – Event" > event title
           let specificName: string;
           if (mktQuestion && !isAnonymized) {
             specificName = mktQuestion;
@@ -247,10 +251,18 @@ async function ensureMarketInfoMap(): Promise<void> {
           } else {
             specificName = name;
           }
+          // Extract CLOB token IDs for outcome-level pricing
+          let yesTokenId: string | undefined;
+          try {
+            const clobIds = mkt.clobTokenIds ? JSON.parse(mkt.clobTokenIds) : [];
+            if (clobIds.length > 0) yesTokenId = clobIds[0];
+          } catch { /* ignore parse errors */ }
           const mktInfo: MarketInfo = {
             ...info,
             name: specificName,
             imageUrl: mkt.image || event.image || event.icon || '',
+            tokenId: yesTokenId,
+            outcomeIndex: mktIdx,
           };
           if (mkt.conditionId) m.set(mkt.conditionId.toLowerCase(), mktInfo);
           if (mkt.id) m.set(mkt.id.toString().toLowerCase(), mktInfo);
@@ -407,6 +419,8 @@ export interface TerminalTrade {
   slug?: string;         // Market slug for URL construction
   category?: string;     // Market category
   imageUrl?: string;     // Market image URL
+  outcomeIndex?: number; // Position in the parent event's outcomes array
+  tokenId?: string;      // Polymarket CLOB token ID or Kalshi market ticker
 }
 
 export interface WhaleAlert {
@@ -501,61 +515,7 @@ const priceMap = new Map<string, number>();
 // POLYMARKET LIVE TRADES FETCHER
 // ============================================================================
 
-// Rotating offset for synthetic trades so different markets appear each poll
-let _polyEventOffset = 0;
-let _kalshiEventOffset = 0;
-
-// ── Tiered share generator ──────────────────────────────────────────────────
-// Generates a share count that produces a notional in a specific tier.
-function tieredShares(price: number, tier: 'low' | 'medium' | 'high'): number {
-  const safePx = Math.max(0.01, price);
-  let minNotional: number, maxNotional: number;
-  if (tier === 'low')    { minNotional = 5;    maxNotional = 250;   }
-  else if (tier === 'medium') { minNotional = 251;  maxNotional = 3000;  }
-  else                   { minNotional = 3001; maxNotional = 15000; }
-  const notional = minNotional + Math.random() * (maxNotional - minNotional);
-  return Math.max(1, Math.round(notional / safePx));
-}
-
 const ANON_RE = /\b(Person|Player|Company|Team|Candidate|Entity)\s+[A-Z]\b/i;
-
-// ── Generates synthetic trades for a specific notional tier from the info map ──
-function generateSyntheticTrades(count: number, tier: 'low' | 'medium' | 'high', baseTs: number): TerminalTrade[] {
-  if (_marketInfoMap.size === 0) return [];
-  const entries = Array.from(_marketInfoMap.entries())
-    .filter(([, info]) => info.name && info.name.length >= 10 && !ANON_RE.test(info.name));
-  if (entries.length === 0) return [];
-  const trades: TerminalTrade[] = [];
-  for (let i = 0; i < count; i++) {
-    const idx = Math.floor(Math.random() * entries.length);
-    const [ticker, info] = entries[idx];
-    if (!info.name || info.name.length < 3) continue;
-    const isKalshi = info.externalUrl?.includes('kalshi.com');
-    if (isKalshi && isKalshiSportsTicker(ticker.toUpperCase())) continue;
-    const price = 0.08 + Math.random() * 0.84;
-    const shares = tieredShares(price, tier);
-    const notional = price * shares;
-    trades.push({
-      id: `syn-${tier}-${baseTs}-${i}-${Math.random().toString(36).slice(2, 7)}`,
-      provider: isKalshi ? 'Kalshi' : 'Polymarket',
-      type: Math.random() > 0.5 ? 'FILL' : 'ORDER',
-      marketId: ticker,
-      marketName: info.name,
-      side: Math.random() > 0.4 ? 'Yes' : 'No',
-      price,
-      priceCents: `${(price * 100).toFixed(1)}¢`,
-      shares,
-      notional,
-      fee: Math.round(notional * 0.02 * 100) / 100,
-      timestamp: new Date(baseTs - i * 37).toISOString(),
-      isWhale: notional >= WHALE_THRESHOLD,
-      externalUrl: info.externalUrl,
-      category: info.category || '',
-      imageUrl: info.imageUrl || '',
-    });
-  }
-  return trades;
-}
 
 async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
   try {
@@ -627,6 +587,9 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
             ? `https://polymarket.com/event/${tradeSlug}`
             : 'https://polymarket.com');
 
+      // Polymarket CLOB asset_id IS the specific outcome's token ID
+      const assetId = t.asset_id || '';
+
       return {
         id: `poly-${t.id || `${Date.now()}-${idx}`}`,
         provider: 'Polymarket' as const,
@@ -646,10 +609,17 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         slug: tradeSlug,
         category: resolvedInfo?.category || '',
         imageUrl: resolvedInfo?.imageUrl || '',
+        outcomeIndex: resolvedInfo?.outcomeIndex,
+        tokenId: assetId || resolvedInfo?.tokenId,
       };
     }).filter((trade: any) => {
       if (!trade.marketName || trade.marketName.length < 5) return false;
       if (ANON_RE.test(trade.marketName)) return false;
+      // Drop trades from markets not in our active market map (likely resolved/closed)
+      if (trade.marketId && _marketInfoMap.size > 0) {
+        const info = resolveMarketInfo(trade.marketId);
+        if (!info) return false;
+      }
       return true;
     });
   } catch (err) {
@@ -791,17 +761,23 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
           externalUrl,
           category,
           imageUrl: resolvedInfo?.imageUrl || '',
+          tokenId: ticker,
+          outcomeIndex: resolvedInfo?.outcomeIndex,
         };
       })
-      // Drop trades with unresolved tickers or anonymized names
       .filter((trade: any) => {
         if (!trade.marketName) return false;
         if (trade.marketName.startsWith('KX') && !trade.marketName.includes(' ')) return false;
         if (ANON_RE.test(trade.marketName)) return false;
+        // Drop trades from markets not in our active market map (likely settled/closed)
+        if (trade.marketId && _marketInfoMap.size > 0) {
+          const info = resolveMarketInfo(trade.marketId);
+          if (!info) return false;
+        }
         return true;
       });
 
-    console.log(`[Terminal] Kalshi: ${trades.length} raw → ${realTrades.length} after sports + name filter`);
+    console.log(`[Terminal] Kalshi: ${trades.length} raw → ${realTrades.length} after sports + name + resolved filter`);
 
     // Return ONLY real trades; do not synthesize additional Kalshi trades
     return realTrades;
@@ -980,67 +956,18 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     fetchMarketTicks(),
   ]);
 
-  // ── Tier-stratified assembly: 100 low ($0-$250) + 100 medium ($251-$3K) + 100 high ($3K+) ──
-  const PER_TIER = 100;
-  const baseTs = Date.now();
   const FIVE_MIN = 5 * 60 * 1000;
-  const combinedAll = [...polyTrades, ...kalshiTrades];
-
-  // Keep only trades from the last 5 minutes and sort newest → oldest
   const nowTs = Date.now();
-  const combined = combinedAll
+
+  // Real trades only — no synthetic filler. Filtered to last 5 min, newest first.
+  const allTrades = [...polyTrades, ...kalshiTrades]
     .filter(t => {
       const ts = Date.parse(t.timestamp);
       return !Number.isNaN(ts) && (nowTs - ts) <= FIVE_MIN;
     })
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
-  const realLow  = combined.filter(t => t.notional <= 250);
-  const realMid  = combined.filter(t => t.notional > 250 && t.notional <= 3000);
-  const realHigh = combined.filter(t => t.notional > 3000);
-
-  const synLow  = realLow.length  < PER_TIER ? generateSyntheticTrades(PER_TIER - realLow.length,  'low',    baseTs) : [];
-  const synMid  = realMid.length  < PER_TIER ? generateSyntheticTrades(PER_TIER - realMid.length,  'medium', baseTs) : [];
-  const synHigh = realHigh.length < PER_TIER ? generateSyntheticTrades(PER_TIER - realHigh.length, 'high',   baseTs) : [];
-
-  // ── Synthetic fast-market trades (≤ 25 per snapshot, drawn from Fast Markets entries) ──
-  const fastEntries = Array.from(_marketInfoMap.entries()).filter(([, v]) => v.category === 'Fast Markets');
-  const synFast: TerminalTrade[] = [];
-  const FAST_COUNT = Math.min(25, fastEntries.length);
-  for (let i = 0; i < FAST_COUNT; i++) {
-    const [ticker, info] = fastEntries[Math.floor(Math.random() * fastEntries.length)];
-    const isKalshi = info.externalUrl?.includes('kalshi.com');
-    const price = 0.08 + Math.random() * 0.84;
-    const tier = Math.random() < 0.5 ? 'low' : 'medium';
-    const shares = tieredShares(price, tier as 'low' | 'medium');
-    const notional = price * shares;
-    synFast.push({
-      id: `syn-fast-${baseTs}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-      provider: isKalshi ? 'Kalshi' : 'Polymarket',
-      type: Math.random() > 0.5 ? 'FILL' : 'ORDER',
-      marketId: ticker,
-      marketName: info.name,
-      side: Math.random() > 0.4 ? 'Yes' : 'No',
-      price,
-      priceCents: `${(price * 100).toFixed(1)}¢`,
-      shares,
-      notional,
-      fee: Math.round(notional * 0.02 * 100) / 100,
-      timestamp: new Date(baseTs - i * 23).toISOString(),
-      isWhale: notional >= WHALE_THRESHOLD,
-      externalUrl: info.externalUrl,
-      category: 'Fast Markets',
-      imageUrl: info.imageUrl || '',
-    });
-  }
-
-  const allTrades: TerminalTrade[] = [
-    ...realLow.slice(0, PER_TIER),  ...synLow,
-    ...realMid.slice(0, PER_TIER),  ...synMid,
-    ...realHigh.slice(0, PER_TIER), ...synHigh,
-    ...synFast,
-  ].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi → low:${realLow.length}+${synLow.length} mid:${realMid.length}+${synMid.length} high:${realHigh.length}+${synHigh.length} fast:${synFast.length} = ${allTrades.length}`);
+  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi → ${allTrades.length} real trades (5-min window)`);
 
   // Update caches (only keep trades from last 5 minutes, newest first)
   const existingIds = new Set(tradeCache.map(t => t.id));

@@ -24,6 +24,8 @@ export async function POST(req: NextRequest) {
   const quantity = Number(body.quantity);
   const currentOutcome = body.currentOutcome || null;
   const stopLossCents = body.stopLossCents ? Number(body.stopLossCents) : null;
+  const outcomeIndex = body.outcomeIndex != null ? Number(body.outcomeIndex) : undefined;
+  const bodyTokenId = body.tokenId ? String(body.tokenId) : undefined;
 
   if (!userId || !marketId || !provider || Number.isNaN(quantity)) {
     return NextResponse.json(
@@ -50,24 +52,28 @@ export async function POST(req: NextRequest) {
         marketId,
         side as 'yes' | 'no',
         outcome,
-        undefined
+        undefined,
+        outcomeIndex,
+        bodyTokenId
       );
+
+      if (!priceResult || priceResult.price <= 0) {
+        console.warn(`[Buy v5] Price unavailable for ${provider}:${marketId} outcomeIndex=${outcomeIndex}`);
+        await client.query("ROLLBACK");
+        return NextResponse.json(
+          { error: "Live price unavailable for this market. Try again or use the Markets tab." },
+          { status: 422 },
+        );
+      }
+
       currentPrice = priceResult.price;
-      console.log(`[Buy v4] Using live provider price from ${priceResult.source} for ${provider}:${marketId}: ${currentPrice}`);
+      console.log(`[Buy v5] Using live provider price from ${priceResult.source} for ${provider}:${marketId}: ${currentPrice}`);
     } catch (priceError) {
       console.error('Error fetching current price:', priceError);
       await client.query("ROLLBACK");
       return NextResponse.json(
         { error: "Failed to fetch current market price" },
         { status: 500 },
-      );
-    }
-
-    if (currentPrice <= 0) {
-      await client.query("ROLLBACK");
-      return NextResponse.json(
-        { error: "Market price not available. Please try again." },
-        { status: 404 },
       );
     }
 
