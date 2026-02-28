@@ -43,72 +43,86 @@ async function ensureMarketInfoMap(): Promise<void> {
 
   const m = new Map<string, MarketInfo>();
 
-  // ── 1. Fetch Kalshi events (with nested markets for ticker mapping) ──
+  // ── 1. Fetch Kalshi events (with nested markets for ticker mapping) — public API, no auth required ──
   try {
     const accessKey = process.env.KALSHI_ACCESS_KEY;
     const privateKey = process.env.KALSHI_PRIVATE_KEY;
-    if (accessKey && privateKey) {
-      let cursor: string | undefined;
-      let pagesFetched = 0;
-      const MAX_PAGES = 4;
+    let cursor: string | undefined;
+    let pagesFetched = 0;
+    const MAX_PAGES = 5;
 
-      while (pagesFetched < MAX_PAGES) {
-        const path = '/trade-api/v2/events';
-        const params = new URLSearchParams({
-          status: 'open',
-          limit: '200',
-          with_nested_markets: 'true',
-        });
-        if (cursor) params.set('cursor', cursor);
-        const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
+    while (pagesFetched < MAX_PAGES) {
+      const path = '/trade-api/v2/events';
+      const params = new URLSearchParams({
+        status: 'open',
+        limit: '200',
+        with_nested_markets: 'true',
+      });
+      if (cursor) params.set('cursor', cursor);
 
-        const res = await fetch(`${KALSHI_API_BASE}${path}?${params}`, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', ...authHeaders },
-          cache: 'no-store',
-        });
-
-        if (!res.ok) break;
-        const data = await res.json();
-        const events: any[] = data.events || [];
-        if (events.length === 0) break;
-
-        for (const event of events) {
-          indexKalshiEvent(m, event);
-        }
-
-        pagesFetched++;
-        cursor = data.cursor;
-        if (!cursor) break;
-        await new Promise(r => setTimeout(r, 50));
-      }
-      // ── 1b. Targeted fetch for sports & spread series (so we get real names like "Duke wins by over 12.5 Points") ──
-      const SPORTS_SERIES = ['KXNCAAMBSPREAD', 'KXNHL', 'KXNBA', 'KXNFL', 'KXMLB', 'KXNCAA', 'KXATP', 'KXWTA', 'KXEPL', 'KXLIGA'];
-      for (const series of SPORTS_SERIES) {
+      const headers: Record<string, string> = { 'Accept': 'application/json', 'Content-Type': 'application/json' };
+      if (accessKey && privateKey) {
         try {
-          const spParams = new URLSearchParams({
-            status: 'open',
-            limit: '100',
-            with_nested_markets: 'true',
-            series_ticker: series,
-          });
-          const spAuth = generateKalshiHeaders('GET', '/trade-api/v2/events', accessKey!, privateKey!);
-          const spRes = await fetch(`${KALSHI_API_BASE}/trade-api/v2/events?${spParams}`, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json', ...spAuth },
-            cache: 'no-store',
-            signal: AbortSignal.timeout(5000),
-          });
-          if (spRes.ok) {
-            const spData = await spRes.json();
-            for (const ev of (spData.events || [])) {
-              indexKalshiEvent(m, ev);
-            }
-          }
-        } catch { /* skip */ }
+          const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
+          Object.assign(headers, authHeaders);
+        } catch { /* proceed without auth */ }
       }
-      console.log(`[Terminal] Kalshi name map: ${m.size} entries (incl. sports)`);
+
+      const res = await fetch(`${KALSHI_API_BASE}${path}?${params}`, {
+        method: 'GET',
+        headers,
+        cache: 'no-store',
+      });
+
+      if (!res.ok) break;
+      const data = await res.json();
+      const events: any[] = data.events || [];
+      if (events.length === 0) break;
+
+      for (const event of events) {
+        indexKalshiEvent(m, event);
+      }
+
+      pagesFetched++;
+      cursor = data.cursor;
+      if (!cursor) break;
+      await new Promise(r => setTimeout(r, 50));
     }
+
+    // ── 1b. Targeted fetch for sports, crypto 15m, earnings (real names like "Will BTC be above $100K?") ──
+    const SPORTS_SERIES = [
+      'KXNCAAMBSPREAD', 'KXNCAAMBGAME', 'KXNHL', 'KXNBA', 'KXNFL', 'KXMLB', 'KXNCAA', 'KXATP', 'KXWTA', 'KXEPL', 'KXLIGA', 'KXBUNDESLIGA2GAME',
+      'KXXRP15M', 'KXBTC15M', 'KXETH15M', 'KXSOL15M', 'KXEARNINGSMENTIONEA',
+    ];
+    for (const series of SPORTS_SERIES) {
+      try {
+        const spParams = new URLSearchParams({
+          status: 'open',
+          limit: '100',
+          with_nested_markets: 'true',
+          series_ticker: series,
+        });
+        const spHeaders: Record<string, string> = { 'Accept': 'application/json' };
+        if (accessKey && privateKey) {
+          try {
+            Object.assign(spHeaders, generateKalshiHeaders('GET', '/trade-api/v2/events', accessKey, privateKey));
+          } catch { /* skip auth */ }
+        }
+        const spRes = await fetch(`${KALSHI_API_BASE}/trade-api/v2/events?${spParams}`, {
+          method: 'GET',
+          headers: spHeaders,
+          cache: 'no-store',
+          signal: AbortSignal.timeout(5000),
+        });
+        if (spRes.ok) {
+          const spData = await spRes.json();
+          for (const ev of (spData.events || [])) {
+            indexKalshiEvent(m, ev);
+          }
+        }
+      } catch { /* skip */ }
+    }
+    console.log(`[Terminal] Kalshi name map: ${m.size} entries (incl. sports)`);
   } catch (err) {
     console.warn('[Terminal] Failed to build Kalshi name map:', err);
   }
@@ -269,44 +283,57 @@ function indexPolymarketEvent(m: Map<string, MarketInfo>, event: any): void {
   }
 }
 
-/** Fetch market title from Kalshi API for tickers not in map; cache and add to map. */
+/** Fetch market title from Kalshi API (public endpoint, no auth) for tickers not in map. */
 async function fetchMarketTitlesForTickers(tickers: string[]): Promise<void> {
-  const accessKey = process.env.KALSHI_ACCESS_KEY;
-  const privateKey = process.env.KALSHI_PRIVATE_KEY;
-  if (!accessKey || !privateKey) return;
+  const now = Date.now();
+  // Expire failed-fetch cache entries after 2 min so we retry
+  for (const [t, ts] of [..._tickerFetchCache.entries()]) {
+    if (now - ts > TICKER_FETCH_CACHE_TTL) _tickerFetchCache.delete(t);
+  }
 
   const unique = [...new Set(tickers.filter(Boolean))];
   const toFetch = unique
     .filter(t => !_marketInfoMap.has(t.toLowerCase()) && !_tickerFetchCache.has(t))
-    .slice(0, 10);
+    .slice(0, 30);
 
   if (toFetch.length === 0) return;
 
-  const { generateKalshiHeaders } = await import('./kalshi-auth');
+  // Use public Kalshi markets API (no auth) — same as ChartModal, reliable for titles
   await Promise.all(
     toFetch.map(async (ticker) => {
-      _tickerFetchCache.set(ticker, Date.now());
       try {
-        const path = `/trade-api/v2/markets/${ticker}`;
-        const auth = generateKalshiHeaders('GET', path, accessKey, privateKey);
-        const res = await fetch(`${KALSHI_API_BASE}${path}`, {
-          headers: { 'Accept': 'application/json', ...auth },
+        const url = `${KALSHI_API_BASE}/trade-api/v2/markets/${encodeURIComponent(ticker)}`;
+        const res = await fetch(url, {
+          headers: { 'Accept': 'application/json' },
           cache: 'no-store',
-          signal: AbortSignal.timeout(3000),
+          signal: AbortSignal.timeout(5000),
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          _tickerFetchCache.set(ticker, now);
+          return;
+        }
         const data = await res.json();
         const m = data.market || data;
-        const title = m.title || m.subtitle || m.yes_sub_title || m.yes_subtitle || '';
-        if (title && title.length > 5) {
+        // Kalshi returns: title, subtitle, yes_sub_title, no_sub_title, question
+        let title = (m.title || m.subtitle || m.yes_sub_title || m.yes_subtitle || m.question || '').trim();
+        // For multi-outcome markets, combine e.g. "Peter Erdo – Who will the next Pope be?"
+        const yesSub = (m.yes_sub_title || m.yes_subtitle || '').trim();
+        if (yesSub && yesSub !== title && !title.toLowerCase().includes(yesSub.toLowerCase())) {
+          title = `${yesSub} – ${title}`;
+        }
+        if (title && title.length > 3) {
           const info: MarketInfo = {
             name: title,
             externalUrl: `https://kalshi.com/markets/${(m.series_ticker || ticker.split('-')[0] || '').toLowerCase()}`,
             category: 'General',
           };
           _marketInfoMap.set(ticker.toLowerCase(), info);
+        } else {
+          _tickerFetchCache.set(ticker, now);
         }
-      } catch { /* ignore */ }
+      } catch {
+        _tickerFetchCache.set(ticker, now);
+      }
     })
   );
   if (_tickerFetchCache.size > 500) {
@@ -479,22 +506,28 @@ const priceMap = new Map<string, number>();
 const ANON_RE = /\b(Person|Player|Company|Team|Candidate|Entity)\s+[A-Z]\b/i;
 
 async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
-  try {
-    // Public trades feed (taker fills only) — no API key required
-    const res = await fetch(`${POLYMARKET_DATA_BASE}/trades?limit=100&takerOnly=true`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json', 'User-Agent': 'PropMarket/1.0' },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(8000),
-    });
+  const url = `${POLYMARKET_DATA_BASE}/trades?limit=100&takerOnly=true`;
+  const opts = {
+    method: 'GET' as const,
+    headers: { 'Accept': 'application/json', 'User-Agent': 'PropMarket/1.0' },
+    cache: 'no-store' as const,
+    signal: AbortSignal.timeout(8000),
+  };
 
-    if (!res.ok) {
-      console.warn(`[Terminal] Polymarket data-api returned ${res.status} ${res.statusText}`);
-      polyConnected = false;
-      return [];
-    }
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(url, opts);
+      if (!res.ok) {
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 500));
+          continue;
+        }
+        console.warn(`[Terminal] Polymarket data-api returned ${res.status} ${res.statusText}`);
+        polyConnected = false;
+        return [];
+      }
 
-    polyConnected = true;
+      polyConnected = true;
     const data = await res.json();
     const rawTrades = Array.isArray(data) ? data : (data?.data || data?.trades || []);
 
@@ -542,7 +575,7 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
 
       const resolvedInfo = resolveMarketInfo(conditionId);
       let rawName = resolvedInfo?.name
-        || t.title || t.question
+        || t.title || t.name || t.question
         || (tradeSlug ? tradeSlug.replace(/-/g, ' ') : '')
         || `Market ${conditionId?.slice(0, 8) || idx}`;
       if (ANON_RE.test(rawName) && resolvedInfo?.name) {
@@ -583,18 +616,26 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
     }).filter((trade: any) => {
       if (!trade.marketName || trade.marketName.length < 5) return false;
       if (ANON_RE.test(trade.marketName)) return false;
-      // Allow through when we have a real market name (from API title or map)
-      if (trade.marketName.length < 10 || trade.marketName.startsWith('Market ')) return false;
+      // Allow any non-generic name (relaxed from 10 chars — Poly titles can be short e.g. "BTC $100K")
+      if (trade.marketName.startsWith('Market ')) return false;
       return true;
     });
 
     console.log(`[Terminal] Polymarket: ${rawTrades.length} raw → ${trades.length} after filtering`);
-    return trades;
-  } catch (err) {
-    console.warn('[Terminal] Polymarket trades fetch error:', err);
-    polyConnected = false;
-    return [];
+      return trades;
+    } catch (err) {
+      if (attempt < 2) {
+        console.warn('[Terminal] Polymarket fetch attempt', attempt, 'failed, retrying:', err);
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+      console.warn('[Terminal] Polymarket trades fetch error:', err);
+      polyConnected = false;
+      return [];
+    }
   }
+  polyConnected = false;
+  return [];
 }
 
 // ============================================================================
@@ -603,6 +644,22 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
 
 // Only filter truly unreadable market tickers (multi-game parlays)
 const KALSHI_UGLY_PREFIXES = ['KXMVE'];
+
+/** Humanize series ticker when API title unavailable (e.g. XRP15M → "XRP 15m", NCAAMBGAME → "NCAAM game") */
+function humanizeKalshiSeries(series: string): string {
+  if (!series) return '';
+  const s = series.toUpperCase();
+  const m: Record<string, string> = {
+    XRP15M: 'XRP 15m', BTC15M: 'Bitcoin 15m', ETH15M: 'Ethereum 15m', SOL15M: 'Solana 15m',
+    NCAAMBGAME: 'NCAAM game', NCAAMBSPREAD: 'NCAAM spread', BUNDESLIGA2GAME: 'Bundesliga game',
+    EARNINGSMENTIONEA: 'Earnings mention', EARNINGSMENTIONEB: 'Earnings mention',
+  };
+  if (m[s]) return m[s];
+  if (/^\w+15M$/i.test(s)) return `${s.replace(/15M$/i, '')} 15m`;
+  if (/GAME$/i.test(s)) return `${s.replace(/GAME$/i, '')} game`;
+  if (/SPREAD$/i.test(s)) return `${s.replace(/SPREAD$/i, '')} spread`;
+  return `${series} market`;
+}
 
 function isUglyTicker(ticker: string): boolean {
   const t = (ticker || '').toUpperCase();
@@ -778,13 +835,14 @@ function mapKalshiTrades(trades: any[]): TerminalTrade[] {
         const targetMatch = ticker.match(/-T([\d.]+)$/i);
         const seriesMatch = ticker.match(/^([A-Z0-9]+)-/i);
         const series = seriesMatch ? seriesMatch[1].replace(/^KX/, '') : '';
+        const humanSeries = humanizeKalshiSeries(series);
         if (targetMatch && series) {
           const target = Number(targetMatch[1]);
           resolvedName = target > 0
-            ? `≤ $${target >= 1000 ? target.toLocaleString('en-US', { maximumFractionDigits: 2 }) : target} – ${series}`
-            : `${series} market`;
+            ? `≤ $${target >= 1000 ? target.toLocaleString('en-US', { maximumFractionDigits: 2 }) : target} – ${humanSeries}`
+            : humanSeries;
         } else {
-          resolvedName = series ? `${series} market` : `Kalshi – ${ticker.slice(0, 20)}`;
+          resolvedName = humanSeries || `Kalshi – ${ticker.slice(0, 20)}`;
         }
       }
       if (resolvedName && !resolvedName.includes(' to ') && !resolvedName.includes('$')) {
@@ -1099,7 +1157,7 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     fetchMarketTicks(),
   ]);
 
-  const FIVE_MIN = 5 * 60 * 1000;
+  const FEED_WINDOW_MS = 10 * 60 * 1000; // 10 min — retain more Poly trades (API can have slight delay)
   const nowTs = Date.now();
 
   // Deduplicate by trade ID
@@ -1112,11 +1170,11 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     deduped.push(t);
   }
 
-  // Filter to last 5 minutes, sort newest first
+  // Filter to last N minutes, sort newest first
   const allTrades = deduped
     .filter(t => {
       const ts = Date.parse(t.timestamp);
-      return !Number.isNaN(ts) && (nowTs - ts) <= FIVE_MIN;
+      return !Number.isNaN(ts) && (nowTs - ts) <= FEED_WINDOW_MS;
     })
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
@@ -1146,7 +1204,7 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
   tradeCache = [...newTrades, ...tradeCache]
     .filter(t => {
       const ts = Date.parse(t.timestamp);
-      return !Number.isNaN(ts) && (nowTs - ts) <= FIVE_MIN;
+      return !Number.isNaN(ts) && (nowTs - ts) <= FEED_WINDOW_MS;
     })
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, TRADE_CACHE_MAX);
