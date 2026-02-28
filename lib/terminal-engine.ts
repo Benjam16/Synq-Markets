@@ -379,6 +379,8 @@ const KALSHI_API_BASE = 'https://api.elections.kalshi.com';
 
 // Category diversity: crypto trades capped at this % of the feed
 const MAX_CRYPTO_PCT = 0.60;
+// Minimum share of feed reserved for Kalshi when available (so Poly doesn't flood the feed)
+const MIN_KALSHI_PCT = 0.25;
 
 // ============================================================================
 // IN-MEMORY CACHE
@@ -699,6 +701,20 @@ function mapKalshiTrades(trades: any[]): TerminalTrade[] {
       const resolvedInfo = resolveMarketInfo(ticker);
 
       let resolvedName = resolvedInfo?.name || t.market_title || t.title || '';
+      // Fallback: build a readable name from ticker when not in market map (e.g. KXBTCD-28FEB2603-T61999.99)
+      if (!resolvedName || resolvedName.length < 3) {
+        const targetMatch = ticker.match(/-T([\d.]+)$/i);
+        const seriesMatch = ticker.match(/^([A-Z0-9]+)-/i);
+        const series = seriesMatch ? seriesMatch[1].replace(/^KX/, '') : '';
+        if (targetMatch && series) {
+          const target = Number(targetMatch[1]);
+          resolvedName = target > 0
+            ? `≤ $${target >= 1000 ? target.toLocaleString('en-US', { maximumFractionDigits: 2 }) : target} – ${series}`
+            : `${series} market`;
+        } else {
+          resolvedName = series ? `${series} market` : `Kalshi – ${ticker.slice(0, 20)}`;
+        }
+      }
       if (resolvedName && !resolvedName.includes(' to ') && !resolvedName.includes('$')) {
         const targetMatch = ticker.match(/-T([\d.]+)$/i);
         if (targetMatch) {
@@ -747,14 +763,10 @@ function mapKalshiTrades(trades: any[]): TerminalTrade[] {
       };
     })
     .filter((trade: any) => {
-      if (!trade.marketName) return false;
+      if (!trade.marketName || trade.marketName.length < 3) return false;
       if (trade.marketName.startsWith('KX') && !trade.marketName.includes(' ')) return false;
       if (ANON_RE.test(trade.marketName)) return false;
-      // Only filter if market map is well-populated
-      if (trade.marketId && _marketInfoMap.size > 100) {
-        const info = resolveMarketInfo(trade.marketId);
-        if (!info) return false;
-      }
+      // Relaxed: keep Kalshi trades even when not in market map (we now have fallback names)
       return true;
     });
 }
@@ -946,6 +958,27 @@ function applyFairRotation(trades: TerminalTrade[]): TerminalTrade[] {
 }
 
 // ============================================================================
+// MINIMUM KALSHI SHARE — ensure Kalshi gets at least N% of the feed when available
+// ============================================================================
+
+function applyMinimumKalshiShare(trades: TerminalTrade[], minPct: number): TerminalTrade[] {
+  if (trades.length < 4) return trades;
+
+  const kalshi = trades.filter(t => t.provider === 'Kalshi');
+  const poly = trades.filter(t => t.provider === 'Polymarket');
+  if (kalshi.length === 0) return trades;
+
+  const quota = Math.ceil(trades.length * minPct);
+  const kalshiTake = Math.min(kalshi.length, quota);
+  const polyTake = trades.length - kalshiTake;
+
+  const kalshiNewest = [...kalshi].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  const polyNewest = [...poly].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+
+  return [...kalshiNewest.slice(0, kalshiTake), ...polyNewest.slice(0, polyTake)];
+}
+
+// ============================================================================
 // MAIN AGGREGATOR
 // ============================================================================
 
@@ -1008,13 +1041,14 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     })
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
-  // Apply fair rotation to ensure category diversity
+  // Apply fair rotation (category diversity) then minimum Kalshi share
   const diverseTrades = applyFairRotation(allTrades);
+  const balancedTrades = applyMinimumKalshiShare(diverseTrades, MIN_KALSHI_PCT);
 
-  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi + ${kalshiCatTrades.length} Cat → ${allTrades.length} deduped → ${diverseTrades.length} diverse`);
+  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi + ${kalshiCatTrades.length} Cat → ${allTrades.length} deduped → ${balancedTrades.length} (min ${MIN_KALSHI_PCT * 100}% Kalshi)`);
 
   // Warm the global price cache from all incoming trades
-  for (const t of diverseTrades) {
+  for (const t of balancedTrades) {
     if (t.price > 0 && t.price < 1) {
       const yesPrice = t.side === 'No' ? 1 - t.price : t.price;
       warmPriceCache(t.provider.toLowerCase(), t.marketId, yesPrice);
@@ -1022,8 +1056,8 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
   }
 
   // Separate whale trades and force-insert at top
-  const whaleTradesInFeed = diverseTrades.filter(t => t.isWhale);
-  const normalTrades = diverseTrades.filter(t => !t.isWhale);
+  const whaleTradesInFeed = balancedTrades.filter(t => t.isWhale);
+  const normalTrades = balancedTrades.filter(t => !t.isWhale);
   const finalTrades = [...whaleTradesInFeed, ...normalTrades];
 
   // Update caches
