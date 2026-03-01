@@ -929,6 +929,15 @@ function mapKalshiTrades(trades: any[]): TerminalTrade[] {
       const externalUrl = resolveExternalUrl(ticker, 'Kalshi');
       const category = resolvedInfo?.category || classifyKalshiTrade(ticker, resolvedName);
 
+      // Kalshi can return created_time/executed_at as unix seconds (number); must normalize to ISO or 30‑min filter drops all
+      const rawTs = t.created_time ?? t.executed_at ?? t.created_at;
+      const isoTime =
+        typeof rawTs === 'number'
+          ? new Date(rawTs * 1000).toISOString()
+          : typeof rawTs === 'string' && rawTs.length > 0
+            ? rawTs
+            : new Date().toISOString();
+
       return {
         id: `kalshi-${t.trade_id || `${Date.now()}-${idx}`}`,
         provider: 'Kalshi' as const,
@@ -941,7 +950,7 @@ function mapKalshiTrades(trades: any[]): TerminalTrade[] {
         shares: Number(shares),
         notional,
         fee: parseFloat(t.fee || '0') || Math.round(notional * 0.07 * 100) / 100,
-        timestamp: t.created_time || t.executed_at || new Date().toISOString(),
+        timestamp: isoTime,
         isWhale: notional >= WHALE_THRESHOLD,
         externalUrl,
         category,
