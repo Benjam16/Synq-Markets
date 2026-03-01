@@ -1338,17 +1338,17 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     const normalTrades = balancedTrades.filter(t => !t.isWhale);
     const finalTrades = [...whaleTradesInFeed, ...normalTrades];
 
-    // Update caches
+    // Update caches — apply provider balance so Poly isn't pushed out by high Kalshi volume
     const existingIds = new Set(tradeCache.map(t => t.id));
     const newTrades = finalTrades.filter(t => !existingIds.has(t.id));
 
-    tradeCache = [...newTrades, ...tradeCache]
+    const merged = [...newTrades, ...tradeCache]
       .filter(t => {
         const ts = Date.parse(t.timestamp);
         return !Number.isNaN(ts) && (nowTs - ts) <= FEED_WINDOW_MS;
       })
-      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-      .slice(0, TRADE_CACHE_MAX);
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+    tradeCache = applyProviderBalance(merged).slice(0, TRADE_CACHE_MAX);
     totalTradeCount += newTrades.length;
     totalVolume += newTrades.reduce((sum, t) => sum + t.notional, 0);
 
