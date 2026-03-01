@@ -492,7 +492,7 @@ const KALSHI_API_BASE = 'https://api.elections.kalshi.com';
 const MAX_CRYPTO_PCT = 0.60;
 // Provider balance: each source gets 40–60% of feed so one doesn't dominate
 const MIN_PROVIDER_PCT = 0.40;
-const MAX_PROVIDER_PCT = 0.60;
+const MAX_PROVIDER_PCT = 0.50; // 50% each so feed stays 50/50 when both have data (was 0.60, let Kalshi push Poly out)
 const FEED_SIZE = 300;
 
 // ============================================================================
@@ -694,16 +694,18 @@ function formatMarketNameAsQuestion(name: string, ticker: string): string {
   if (!n) return name;
   if (n.includes('?') || /^Will\s/i.test(n)) return n; // already question form
 
-  // Parse date from ticker (e.g. KXBTCD-28FEB2603-T61999.99 → Feb 28, 2026)
+  // Parse date from ticker (e.g. KXBTCD-28FEB2603-T61999.99 → Feb 28, 2026). Avoid 2001: ticker may use "01" as id, not year.
   const datePart = ticker.match(/-(\d{2}[A-Z]{3}\d{2,4})/i);
   let byDate = '';
   if (datePart) {
-    const d = datePart[1]; // 28FEB2603 or 28FEB26
+    const d = datePart[1]; // 28FEB2603, 28FEB26, or 26MAR01 (01 can be id, not year)
     const day = d.slice(0, 2);
     const mon = d.slice(2, 5).toUpperCase();
-    const year = d.length >= 7 ? `20${d.slice(5, 7)}` : d.slice(5) || '26';
-    const months: Record<string, string> = { JAN: 'Jan', FEB: 'Feb', MAR: 'Mar', APR: 'Apr', MAY: 'May', JUN: 'Jun', JUL: 'Jul', AUG: 'Aug', SEP: 'Sep', OCT: 'Oct', NOV: 'Nov', DEC: 'Dec' };
-    byDate = months[mon] ? ` by ${months[mon]} ${day}, ${year}` : '';
+    let yearStr = d.length >= 7 ? `20${d.slice(5, 7)}` : (d.slice(5) || '26');
+    const yearNum = parseInt(yearStr, 10);
+    if (yearNum < 2025) yearStr = '2026'; // never show 2001 etc.; ticker "01" is often not a year
+    const monthsFull: Record<string, string> = { JAN: 'January', FEB: 'February', MAR: 'March', APR: 'April', MAY: 'May', JUN: 'June', JUL: 'July', AUG: 'August', SEP: 'September', OCT: 'October', NOV: 'November', DEC: 'December' };
+    byDate = monthsFull[mon] ? ` by ${monthsFull[mon]} ${day}, ${yearStr}` : '';
   }
 
   // Price target: "≤ $61,999.99 – Bitcoin price" → "Will Bitcoin be at or above $61,999.99 by Feb 28, 2026?"
@@ -1159,7 +1161,7 @@ function applyFairRotation(trades: TerminalTrade[]): TerminalTrade[] {
 // PROVIDER BALANCE — each source gets 40–60% so neither dominates the feed
 // ============================================================================
 
-/** Interleave Kalshi and Poly so each gets 40–60% of the feed (no single source takeover). */
+/** Interleave Kalshi and Poly so the feed is mixed (no huge same-provider sections). */
 function applyProviderBalance(trades: TerminalTrade[]): TerminalTrade[] {
   if (trades.length < 4) return trades;
 
@@ -1172,32 +1174,53 @@ function applyProviderBalance(trades: TerminalTrade[]): TerminalTrade[] {
   if (kalshi.length === 0) return poly.slice(0, FEED_SIZE);
   if (poly.length === 0) return kalshi.slice(0, FEED_SIZE);
 
-  const maxPerProvider = Math.ceil(FEED_SIZE * MAX_PROVIDER_PCT);   // 180 each
+  const maxPerProvider = Math.ceil(FEED_SIZE * MAX_PROVIDER_PCT);   // 150 each → 50/50
   const minPerProvider = Math.floor(FEED_SIZE * MIN_PROVIDER_PCT);  // 120 each
+  const capK = kalshi.slice(0, maxPerProvider);
+  const capP = poly.slice(0, maxPerProvider);
   const result: TerminalTrade[] = [];
   let ki = 0;
   let pi = 0;
   let kCount = 0;
   let pCount = 0;
+  const maxConsecutive = 3;
+  let lastProvider: 'Kalshi' | 'Polymarket' | null = null;
+  let consecutive = 0;
 
-  while (result.length < FEED_SIZE && (ki < kalshi.length || pi < poly.length)) {
-    const atCapK = kCount >= maxPerProvider;
-    const atCapP = pCount >= maxPerProvider;
-    if (atCapK && atCapP) break;
-    if (atCapK) { result.push(poly[pi++]); pCount++; continue; }
-    if (atCapP) { result.push(kalshi[ki++]); kCount++; continue; }
-    if (ki < kalshi.length && pi < poly.length) {
-      if (kCount < pCount || (pCount >= minPerProvider && kCount < minPerProvider)) {
-        result.push(kalshi[ki++]);
-        kCount++;
-      } else {
-        result.push(poly[pi++]);
-        pCount++;
-      }
-      continue;
-    }
-    if (ki < kalshi.length) { result.push(kalshi[ki++]); kCount++; }
-    else if (pi < poly.length) { result.push(poly[pi++]); pCount++; }
+  while (result.length < FEED_SIZE && (ki < capK.length || pi < capP.length)) {
+    const canK = ki < capK.length;
+    const canP = pi < capP.length;
+    const forceOther = lastProvider !== null && consecutive >= maxConsecutive;
+    // When both available: prefer provider that's under minimum share so we hit 50/50
+    const kUnderMin = kCount < minPerProvider;
+    const pUnderMin = pCount < minPerProvider;
+    const pickK =
+      forceOther
+        ? lastProvider === 'Polymarket' && canK
+        : !canP
+          ? canK
+          : !canK
+            ? false
+            : canP && canK
+              ? pUnderMin
+                ? false
+                : kUnderMin
+                  ? true
+                  : result.length % 2 === 0
+              : canK;
+    if (pickK && canK) {
+      result.push(capK[ki++]);
+      kCount++;
+      if (lastProvider === 'Kalshi') consecutive++; else { lastProvider = 'Kalshi'; consecutive = 1; }
+    } else if (canP) {
+      result.push(capP[pi++]);
+      pCount++;
+      if (lastProvider === 'Polymarket') consecutive++; else { lastProvider = 'Polymarket'; consecutive = 1; }
+    } else if (canK) {
+      result.push(capK[ki++]);
+      kCount++;
+      if (lastProvider === 'Kalshi') consecutive++; else { lastProvider = 'Kalshi'; consecutive = 1; }
+    } else break;
   }
 
   return result;
