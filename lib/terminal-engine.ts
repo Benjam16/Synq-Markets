@@ -25,13 +25,15 @@ interface MarketInfo {
   imageUrl?: string;
   tokenId?: string;
   outcomeIndex?: number;
+  /** When true, market has already resolved — exclude from live feed */
+  settled?: boolean;
 }
 
 let _marketInfoMap: Map<string, MarketInfo> = new Map();
 let _marketInfoMapAge = 0;
 const MARKET_INFO_MAP_TTL = 300_000; // 5 minutes
 const _tickerFetchCache = new Map<string, number>();
-const TICKER_FETCH_CACHE_TTL = 120_000; // 2 min
+const TICKER_FETCH_CACHE_TTL = 60_000; // 1 min — retry failed fetches sooner for better names
 
 /**
  * Build the market info map from Kalshi & Polymarket APIs.
@@ -294,7 +296,7 @@ async function fetchMarketTitlesForTickers(tickers: string[]): Promise<void> {
   const unique = [...new Set(tickers.filter(Boolean))];
   const toFetch = unique
     .filter(t => !_marketInfoMap.has(t.toLowerCase()) && !_tickerFetchCache.has(t))
-    .slice(0, 30);
+    .slice(0, 50);
 
   if (toFetch.length === 0) return;
 
@@ -322,10 +324,13 @@ async function fetchMarketTitlesForTickers(tickers: string[]): Promise<void> {
           title = `${yesSub} – ${title}`;
         }
         if (title && title.length > 3) {
+          const status = (m.status || '').toLowerCase();
+          const settled = status === 'settled' || status === 'closed' || status === 'finalized';
           const info: MarketInfo = {
             name: title,
             externalUrl: `https://kalshi.com/markets/${(m.series_ticker || ticker.split('-')[0] || '').toLowerCase()}`,
             category: 'General',
+            settled,
           };
           _marketInfoMap.set(ticker.toLowerCase(), info);
         } else {
@@ -404,6 +409,8 @@ export interface TerminalTrade {
   imageUrl?: string;
   outcomeIndex?: number;
   tokenId?: string;
+  /** Internal: exclude from feed when market already resolved */
+  marketSettled?: boolean;
 }
 
 export interface WhaleAlert {
@@ -506,33 +513,38 @@ const priceMap = new Map<string, number>();
 const ANON_RE = /\b(Person|Player|Company|Team|Candidate|Entity)\s+[A-Z]\b/i;
 
 async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
-  const url = `${POLYMARKET_DATA_BASE}/trades?limit=100&takerOnly=true`;
   const opts = {
     method: 'GET' as const,
     headers: { 'Accept': 'application/json', 'User-Agent': 'PropMarket/1.0' },
     cache: 'no-store' as const,
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(10000),
   };
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const res = await fetch(url, opts);
-      if (!res.ok) {
-        if (attempt < 2) {
-          await new Promise(r => setTimeout(r, 500));
-          continue;
+  // Try takerOnly=true first; if we get 0 trades, retry without it for broader feed
+  for (const takerOnly of [true, false]) {
+    const url = `${POLYMARKET_DATA_BASE}/trades?limit=100&takerOnly=${takerOnly}`;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const res = await fetch(url, opts);
+        if (!res.ok) {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 500));
+            continue;
+          }
+          if (takerOnly === false) {
+            console.warn(`[Terminal] Polymarket data-api returned ${res.status} ${res.statusText}`);
+            polyConnected = false;
+            return [];
+          }
+          break; // try takerOnly=false
         }
-        console.warn(`[Terminal] Polymarket data-api returned ${res.status} ${res.statusText}`);
-        polyConnected = false;
-        return [];
-      }
 
-      polyConnected = true;
-    const data = await res.json();
-    const rawTrades = Array.isArray(data) ? data : (data?.data || data?.trades || []);
+        polyConnected = true;
+        const data = await res.json();
+        const rawTrades = Array.isArray(data) ? data : (data?.data || data?.trades || []);
+        if (rawTrades.length === 0 && takerOnly === true) break; // try without takerOnly
 
-    await ensureMarketInfoMap();
-
+    // Don't block on ensureMarketInfoMap — Polymarket API returns title per trade; use it directly
     const trades = rawTrades.slice(0, 100).map((t: any, idx: number) => {
       // Data API shape:
       // {
@@ -592,7 +604,7 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
       const isoTs = timestampSec > 0 ? new Date(timestampSec * 1000).toISOString() : new Date().toISOString();
 
       return {
-        id: `poly-${t.id || `${Date.now()}-${idx}`}`,
+        id: `poly-${t.id || t.transactionHash || `${conditionId}-${timestampSec}-${idx}`}`,
         provider: 'Polymarket' as const,
         type: (t.type || 'FILL').toUpperCase() as TerminalTrade['type'],
         marketId: conditionId || `poly-${idx}`,
@@ -614,24 +626,26 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         tokenId: assetId || resolvedInfo?.tokenId,
       };
     }).filter((trade: any) => {
-      if (!trade.marketName || trade.marketName.length < 5) return false;
+      if (!trade.marketName || trade.marketName.length < 3) return false;
       if (ANON_RE.test(trade.marketName)) return false;
-      // Allow any non-generic name (relaxed from 10 chars — Poly titles can be short e.g. "BTC $100K")
-      if (trade.marketName.startsWith('Market ')) return false;
+      if (trade.marketName.startsWith('Market ') && trade.marketName.length < 15) return false;
       return true;
     });
 
-    console.log(`[Terminal] Polymarket: ${rawTrades.length} raw → ${trades.length} after filtering`);
-      return trades;
-    } catch (err) {
-      if (attempt < 2) {
-        console.warn('[Terminal] Polymarket fetch attempt', attempt, 'failed, retrying:', err);
-        await new Promise(r => setTimeout(r, 500));
-        continue;
+        console.log(`[Terminal] Polymarket: ${rawTrades.length} raw → ${trades.length} after filtering (takerOnly=${takerOnly})`);
+        return trades;
+      } catch (err) {
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 500));
+          continue;
+        }
+        if (takerOnly === false) {
+          console.warn('[Terminal] Polymarket trades fetch error:', err);
+          polyConnected = false;
+          return [];
+        }
+        break;
       }
-      console.warn('[Terminal] Polymarket trades fetch error:', err);
-      polyConnected = false;
-      return [];
     }
   }
   polyConnected = false;
@@ -645,14 +659,14 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
 // Only filter truly unreadable market tickers (multi-game parlays)
 const KALSHI_UGLY_PREFIXES = ['KXMVE'];
 
-/** Humanize series ticker when API title unavailable (e.g. XRP15M → "XRP 15m", NCAAMBGAME → "NCAAM game") */
+/** Humanize series ticker when API title unavailable — last resort only */
 function humanizeKalshiSeries(series: string): string {
   if (!series) return '';
   const s = series.toUpperCase();
   const m: Record<string, string> = {
-    XRP15M: 'XRP 15m', BTC15M: 'Bitcoin 15m', ETH15M: 'Ethereum 15m', SOL15M: 'Solana 15m',
+    XRP15M: 'XRP 15m', BTC15M: 'Bitcoin 15m', ETH15M: 'Ethereum 15m', SOL15M: 'Solana 15m', BTCD: 'Bitcoin price',
     NCAAMBGAME: 'NCAAM game', NCAAMBSPREAD: 'NCAAM spread', BUNDESLIGA2GAME: 'Bundesliga game',
-    EARNINGSMENTIONEA: 'Earnings mention', EARNINGSMENTIONEB: 'Earnings mention',
+    EARNINGSMENTIONEA: 'Earnings mention', RAINNYCM: 'NYC rain', AAAGASW: 'Gas prices', TRUMPSAY: 'Trump',
   };
   if (m[s]) return m[s];
   if (/^\w+15M$/i.test(s)) return `${s.replace(/15M$/i, '')} 15m`;
@@ -701,7 +715,7 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
     const data = await res.json();
     const trades = data.trades || [];
 
-    await ensureMarketInfoMap();
+    // fetchMarketTitlesForTickers populates names directly; don't block on ensureMarketInfoMap
     const tickers = trades.map((t: any) => t.ticker || t.market_ticker).filter(Boolean);
     await fetchMarketTitlesForTickers(tickers);
 
@@ -890,13 +904,14 @@ function mapKalshiTrades(trades: any[]): TerminalTrade[] {
         imageUrl: resolvedInfo?.imageUrl || '',
         tokenId: ticker,
         outcomeIndex: resolvedInfo?.outcomeIndex,
+        marketSettled: resolvedInfo?.settled === true,
       };
     })
     .filter((trade: any) => {
+      if (trade.marketSettled === true) return false; // exclude already-determined markets
       if (!trade.marketName || trade.marketName.length < 3) return false;
       if (trade.marketName.startsWith('KX') && !trade.marketName.includes(' ')) return false;
       if (ANON_RE.test(trade.marketName)) return false;
-      // Relaxed: keep Kalshi trades even when not in market map (we now have fallback names)
       return true;
     });
 }
@@ -1147,7 +1162,8 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     };
   }
 
-  await ensureMarketInfoMap();
+  // Don't block on ensureMarketInfoMap — it can take 30+ sec; run in background so Poly/Kalshi fetches start immediately
+  ensureMarketInfoMap().catch(() => {});
 
   // Fetch from multiple sources in parallel for diversity
   const [polyTrades, kalshiTrades, kalshiCatTrades, ticks] = await Promise.all([
@@ -1157,14 +1173,15 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
     fetchMarketTicks(),
   ]);
 
-  const FEED_WINDOW_MS = 10 * 60 * 1000; // 10 min — retain more Poly trades (API can have slight delay)
+  const FEED_WINDOW_MS = 15 * 60 * 1000; // 15 min — keep Poly trades (API delay) and recent Kalshi
   const nowTs = Date.now();
 
-  // Deduplicate by trade ID
+  // Deduplicate by trade ID and drop settled/determined Kalshi markets
   const seenIds = new Set<string>();
   const allRaw = [...polyTrades, ...kalshiTrades, ...kalshiCatTrades];
   const deduped: TerminalTrade[] = [];
   for (const t of allRaw) {
+    if (t.marketSettled === true) continue;
     if (seenIds.has(t.id)) continue;
     seenIds.add(t.id);
     deduped.push(t);
