@@ -154,6 +154,7 @@ interface TerminalStats {
   polymarketConnected: boolean;
   kalshiConnected: boolean;
   lastUpdate: string;
+  engineVersion?: string;
 }
 
 // ============================================================================
@@ -1239,6 +1240,9 @@ export default function TerminalPage() {
                 <span className="text-[#4FFFC8] font-mono font-bold text-lg">{stats?.rate || '0/s'}</span>
                 <span className="block text-slate-500 uppercase tracking-wider text-[9px]">Rate</span>
               </div>
+              {stats?.engineVersion && (
+                <span className="text-slate-600 text-[9px] font-mono" title="Backend version (confirm deploy)">v{stats.engineVersion}</span>
+              )}
             </div>
 
             {/* Provider Status */}
