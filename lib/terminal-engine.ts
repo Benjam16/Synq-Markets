@@ -1233,82 +1233,112 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
   // Don't block on ensureMarketInfoMap — it can take 30+ sec; run in background so Poly/Kalshi fetches start immediately
   ensureMarketInfoMap().catch(() => {});
 
-  // Fetch from multiple sources in parallel for diversity
-  const [polyTrades, kalshiTrades, kalshiCatTrades, ticks] = await Promise.all([
-    fetchPolymarketLiveTrades(),
-    fetchKalshiLiveTrades(),
-    fetchKalshiCategoryTrades(),
-    fetchMarketTicks(),
-  ]);
+  const emptySnapshot = (): TerminalSnapshot => {
+    const uptime = Math.floor((now - startTime) / 1000);
+    const rate = uptime > 0 ? (totalTradeCount / uptime).toFixed(1) : '0';
+    return {
+      trades: tradeCache.slice(0, 300),
+      whaleAlerts: whaleCache.slice(0, 20),
+      arbSignals: arbCache.slice(0, 10),
+      marketTicks: marketTickCache.slice(0, 50),
+      stats: {
+        totalTrades: totalTradeCount,
+        totalVolume: Math.round(totalVolume),
+        avgTradeSize: totalTradeCount > 0 ? Math.round(totalVolume / totalTradeCount) : 0,
+        whaleCount: whaleCache.length,
+        arbCount: arbCache.length,
+        uptime,
+        rate: `${rate}/s`,
+        polymarketConnected: polyConnected,
+        kalshiConnected: kalshiConnected,
+        lastUpdate: new Date().toISOString(),
+        engineVersion: '2026-03-02',
+      },
+    };
+  };
 
-  const FEED_WINDOW_MS = 30 * 60 * 1000; // 30 min — keep Polymarket (API delay) and recent Kalshi
-  const nowTs = Date.now();
+  try {
+    // Fetch from multiple sources in parallel for diversity
+    const [polyTrades, kalshiTrades, kalshiCatTrades, ticks] = await Promise.all([
+      fetchPolymarketLiveTrades(),
+      fetchKalshiLiveTrades(),
+      fetchKalshiCategoryTrades(),
+      fetchMarketTicks(),
+    ]);
 
-  // Deduplicate by trade ID and drop settled/determined Kalshi markets
-  const seenIds = new Set<string>();
-  const allRaw = [...polyTrades, ...kalshiTrades, ...kalshiCatTrades];
-  const deduped: TerminalTrade[] = [];
-  for (const t of allRaw) {
-    if (t.marketSettled === true) continue;
-    if (seenIds.has(t.id)) continue;
-    seenIds.add(t.id);
-    deduped.push(t);
-  }
+    const FEED_WINDOW_MS = 30 * 60 * 1000; // 30 min — keep Polymarket (API delay) and recent Kalshi
+    const nowTs = Date.now();
 
-  // Filter to last N minutes, sort newest first
-  const allTrades = deduped
-    .filter(t => {
-      const ts = Date.parse(t.timestamp);
-      return !Number.isNaN(ts) && (nowTs - ts) <= FEED_WINDOW_MS;
-    })
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-
-  // Apply fair rotation (category diversity) then 40–60% provider balance
-  const diverseTrades = applyFairRotation(allTrades);
-  const balancedTrades = applyProviderBalance(diverseTrades);
-
-  const kInFeed = balancedTrades.filter(t => t.provider === 'Kalshi').length;
-  const pInFeed = balancedTrades.filter(t => t.provider === 'Polymarket').length;
-  console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi + ${kalshiCatTrades.length} Cat → ${allTrades.length} deduped → ${balancedTrades.length} (${pInFeed} Poly / ${kInFeed} Kalshi in feed)`);
-
-  // Warm the global price cache from all incoming trades
-  for (const t of balancedTrades) {
-    if (t.price > 0 && t.price < 1) {
-      const yesPrice = t.side === 'No' ? 1 - t.price : t.price;
-      warmPriceCache(t.provider.toLowerCase(), t.marketId, yesPrice);
+    // Deduplicate by trade ID and drop settled/determined Kalshi markets
+    const seenIds = new Set<string>();
+    const allRaw = [...polyTrades, ...kalshiTrades, ...kalshiCatTrades];
+    const deduped: TerminalTrade[] = [];
+    for (const t of allRaw) {
+      if (t.marketSettled === true) continue;
+      if (seenIds.has(t.id)) continue;
+      seenIds.add(t.id);
+      deduped.push(t);
     }
+
+    // Filter to last N minutes, sort newest first
+    const allTrades = deduped
+      .filter(t => {
+        const ts = Date.parse(t.timestamp);
+        return !Number.isNaN(ts) && (nowTs - ts) <= FEED_WINDOW_MS;
+      })
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+
+    // Apply fair rotation (category diversity) then 40–60% provider balance
+    const diverseTrades = applyFairRotation(allTrades);
+    const balancedTrades = applyProviderBalance(diverseTrades);
+
+    const kInFeed = balancedTrades.filter(t => t.provider === 'Kalshi').length;
+    const pInFeed = balancedTrades.filter(t => t.provider === 'Polymarket').length;
+    console.log(`[Terminal] Merged: ${polyTrades.length} Poly + ${kalshiTrades.length} Kalshi + ${kalshiCatTrades.length} Cat → ${allTrades.length} deduped → ${balancedTrades.length} (${pInFeed} Poly / ${kInFeed} Kalshi in feed)`);
+
+    // Warm the global price cache from all incoming trades
+    for (const t of balancedTrades) {
+      if (t.price > 0 && t.price < 1) {
+        const yesPrice = t.side === 'No' ? 1 - t.price : t.price;
+        warmPriceCache(t.provider.toLowerCase(), t.marketId, yesPrice);
+      }
+    }
+
+    // Separate whale trades and force-insert at top
+    const whaleTradesInFeed = balancedTrades.filter(t => t.isWhale);
+    const normalTrades = balancedTrades.filter(t => !t.isWhale);
+    const finalTrades = [...whaleTradesInFeed, ...normalTrades];
+
+    // Update caches
+    const existingIds = new Set(tradeCache.map(t => t.id));
+    const newTrades = finalTrades.filter(t => !existingIds.has(t.id));
+
+    tradeCache = [...newTrades, ...tradeCache]
+      .filter(t => {
+        const ts = Date.parse(t.timestamp);
+        return !Number.isNaN(ts) && (nowTs - ts) <= FEED_WINDOW_MS;
+      })
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .slice(0, TRADE_CACHE_MAX);
+    totalTradeCount += newTrades.length;
+    totalVolume += newTrades.reduce((sum, t) => sum + t.notional, 0);
+
+    // Detect whales
+    const newWhales = detectWhales(newTrades);
+    whaleCache = [...newWhales, ...whaleCache].slice(0, WHALE_CACHE_MAX);
+
+    // Update market ticks
+    marketTickCache = ticks.slice(0, MARKET_TICK_MAX);
+
+    // Scan arbitrage
+    arbCache = scanArbFromTicks(ticks);
+
+    lastFetchTime = now;
+  } catch (err) {
+    console.error('[Terminal] getTerminalSnapshot error (returning cached/empty snapshot):', err);
+    // Return valid snapshot so API stays 200 and UI shows LIVE; use existing caches
+    return emptySnapshot();
   }
-
-  // Separate whale trades and force-insert at top
-  const whaleTradesInFeed = balancedTrades.filter(t => t.isWhale);
-  const normalTrades = balancedTrades.filter(t => !t.isWhale);
-  const finalTrades = [...whaleTradesInFeed, ...normalTrades];
-
-  // Update caches
-  const existingIds = new Set(tradeCache.map(t => t.id));
-  const newTrades = finalTrades.filter(t => !existingIds.has(t.id));
-
-  tradeCache = [...newTrades, ...tradeCache]
-    .filter(t => {
-      const ts = Date.parse(t.timestamp);
-      return !Number.isNaN(ts) && (nowTs - ts) <= FEED_WINDOW_MS;
-    })
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .slice(0, TRADE_CACHE_MAX);
-  totalTradeCount += newTrades.length;
-  totalVolume += newTrades.reduce((sum, t) => sum + t.notional, 0);
-
-  // Detect whales
-  const newWhales = detectWhales(newTrades);
-  whaleCache = [...newWhales, ...whaleCache].slice(0, WHALE_CACHE_MAX);
-
-  // Update market ticks
-  marketTickCache = ticks.slice(0, MARKET_TICK_MAX);
-
-  // Scan arbitrage
-  arbCache = scanArbFromTicks(ticks);
-
-  lastFetchTime = now;
 
   const uptime = Math.floor((now - startTime) / 1000);
   const rate = uptime > 0 ? (totalTradeCount / uptime).toFixed(1) : '0';
