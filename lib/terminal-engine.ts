@@ -523,7 +523,7 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
     method: 'GET' as const,
     headers: { 'Accept': 'application/json', 'User-Agent': 'PropMarket/1.0', 'Cache-Control': 'no-cache' },
     cache: 'no-store' as const,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(8000),
   };
 
   // Try takerOnly=false first (more trades); then takerOnly=true if needed
@@ -632,8 +632,9 @@ async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
         tokenId: assetId || resolvedInfo?.tokenId,
       };
     }).filter((trade: any) => {
-      if (!trade.marketName || String(trade.marketName).trim().length < 1) return false;
-      if (trade.marketName.startsWith('Market 0x') && trade.marketName.length < 20) return false;
+      const name = String(trade.marketName || '').trim();
+      if (!name) return false;
+      // Allow all non-empty names — previously we dropped "Market 0x..." < 20 chars and excluded valid Poly trades
       return true;
     });
 
@@ -760,9 +761,9 @@ async function fetchKalshiLiveTrades(): Promise<TerminalTrade[]> {
     const data = await res.json();
     const trades = data.trades || [];
 
-    // fetchMarketTitlesForTickers populates names directly; don't block on ensureMarketInfoMap
+    // Populate titles in background so first load is fast; mapKalshiTrades uses humanized fallbacks until then
     const tickers = trades.map((t: any) => t.ticker || t.market_ticker).filter(Boolean);
-    await fetchMarketTitlesForTickers(tickers);
+    fetchMarketTitlesForTickers(tickers).catch(() => {});
 
     const mapped = mapKalshiTrades(trades);
     console.log(`[Terminal] Kalshi general: ${trades.length} raw → ${mapped.length} after filter`);
@@ -811,41 +812,37 @@ async function fetchKalshiCategoryTrades(): Promise<TerminalTrade[]> {
   ];
 
   const allCategoryTrades: TerminalTrade[] = [];
-  const batchSize = 6;
-
-  for (let i = 0; i < DIVERSE_SERIES.length; i += batchSize) {
-    const batch = DIVERSE_SERIES.slice(i, i + batchSize);
-    const results = await Promise.allSettled(
-      batch.map(async (series) => {
-        try {
-          const path = '/trade-api/v2/markets/trades';
-          const params = new URLSearchParams({
-            limit: '20',
-            ticker: series,
-          });
-          const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
-          const res = await fetch(`${KALSHI_API_BASE}${path}?${params}`, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json', ...authHeaders },
-            cache: 'no-store',
-            signal: AbortSignal.timeout(4000),
-          });
-          if (!res.ok) return [];
-          const data = await res.json();
-          return data.trades || [];
-        } catch {
-          return [];
-        }
-      })
-    );
-
-    for (const r of results) {
-      if (r.status === 'fulfilled' && r.value.length > 0) {
-        const batch = r.value;
-        const batchTickers = batch.map((t: any) => t.ticker || t.market_ticker).filter(Boolean);
-        await fetchMarketTitlesForTickers(batchTickers);
-        allCategoryTrades.push(...mapKalshiTrades(batch));
+  // Fetch all series in parallel (no sequential batches) so category trades don't add 30+ seconds
+  const results = await Promise.allSettled(
+    DIVERSE_SERIES.map(async (series) => {
+      try {
+        const path = '/trade-api/v2/markets/trades';
+        const params = new URLSearchParams({
+          limit: '20',
+          ticker: series,
+        });
+        const authHeaders = generateKalshiHeaders('GET', path, accessKey, privateKey);
+        const res = await fetch(`${KALSHI_API_BASE}${path}?${params}`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json', ...authHeaders },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.trades || [];
+      } catch {
+        return [];
       }
+    })
+  );
+
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value.length > 0) {
+      const batch = r.value;
+      // Don't await title fetch here — it was blocking 4+ rounds and causing 30–60s delay; use map cache or humanized names
+      fetchMarketTitlesForTickers(batch.map((t: any) => t.ticker || t.market_ticker).filter(Boolean)).catch(() => {});
+      allCategoryTrades.push(...mapKalshiTrades(batch));
     }
   }
 
