@@ -688,27 +688,30 @@ function humanizeKalshiSeries(series: string): string {
   return `${series} market`;
 }
 
-/** Format market name as "Will X happen?" or "Will X happen by date?" when not already question form */
+/** Use the bet title as-is when it's a real question; only format fallbacks. Never slap ticker date on generic names. */
 function formatMarketNameAsQuestion(name: string, ticker: string): string {
   const n = (name || '').trim();
   if (!n) return name;
-  if (n.includes('?') || /^Will\s/i.test(n)) return n; // already question form
+  // Already a clear question (from API / Fireplace-style) — use as-is, ensure trailing ?
+  if (n.includes('?') || /^Will\s/i.test(n)) return n.endsWith('?') ? n : `${n}?`;
+  // Long, substantive title that looks like the real bet (e.g. has a year) — use as-is
+  if (n.length > 28 && /\b(202[5-9]|2030)\b/.test(n)) return n.endsWith('?') ? n : `${n}?`;
 
-  // Parse date from ticker (e.g. KXBTCD-28FEB2603-T61999.99 → Feb 28, 2026). Avoid 2001: ticker may use "01" as id, not year.
+  // Parse date from ticker only for price-target lines where it's meaningful
   const datePart = ticker.match(/-(\d{2}[A-Z]{3}\d{2,4})/i);
   let byDate = '';
   if (datePart) {
-    const d = datePart[1]; // 28FEB2603, 28FEB26, or 26MAR01 (01 can be id, not year)
+    const d = datePart[1];
     const day = d.slice(0, 2);
     const mon = d.slice(2, 5).toUpperCase();
     let yearStr = d.length >= 7 ? `20${d.slice(5, 7)}` : (d.slice(5) || '26');
     const yearNum = parseInt(yearStr, 10);
-    if (yearNum < 2025) yearStr = '2026'; // never show 2001 etc.; ticker "01" is often not a year
+    if (yearNum < 2025) yearStr = '2026';
     const monthsFull: Record<string, string> = { JAN: 'January', FEB: 'February', MAR: 'March', APR: 'April', MAY: 'May', JUN: 'June', JUL: 'July', AUG: 'August', SEP: 'September', OCT: 'October', NOV: 'November', DEC: 'December' };
     byDate = monthsFull[mon] ? ` by ${monthsFull[mon]} ${day}, ${yearStr}` : '';
   }
 
-  // Price target: "≤ $61,999.99 – Bitcoin price" → "Will Bitcoin be at or above $61,999.99 by Feb 28, 2026?"
+  // Price target: "≤ $61,999.99 – Bitcoin price" → "Will Bitcoin be at or above $61,999.99 by date?"
   const priceMatch = n.match(/^(≤?\s*\$[\d,.]+\s*(?:or above)?)\s*[–-]\s*(.+)$/i);
   if (priceMatch) {
     const target = priceMatch[1].trim();
@@ -718,9 +721,9 @@ function formatMarketNameAsQuestion(name: string, ticker: string): string {
     return `Will ${subject} ${verb} ${amount}${byDate || ' by resolution date'}?`;
   }
 
-  // Generic: "Will [X] resolve?"
+  // Generic fallback (e.g. "EPL game", "NCAAM game") — no ticker date; that's not the bet
   const clean = n.replace(/\s+market$/i, '').trim();
-  return `Will ${clean} resolve${byDate ? byDate + '?' : '?'}`;
+  return `Will ${clean} resolve?`;
 }
 
 function isUglyTicker(ticker: string): boolean {
