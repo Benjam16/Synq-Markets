@@ -68,7 +68,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   ];
 
   // Secondary navigation (Right) - Management links
-  const secondaryNavItems = [];
+  const secondaryNavItems: { href: string; label: string; icon: React.ComponentType }[] = [];
 
   // All nav items for mobile menu
   const allNavItems = [
