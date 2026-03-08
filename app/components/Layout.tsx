@@ -64,18 +64,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const primaryNavItems = [
     { href: "/markets", label: "Markets", icon: BarChart3 },
     { href: "/terminal", label: "Terminal", icon: Monitor },
-    { href: "/challenges", label: "Challenges", icon: Target },
     { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
-    ...(user ? [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }] : []),
   ];
 
   // Secondary navigation (Right) - Management links
-  const secondaryNavItems = user ? [
-    { href: "/accounts", label: "Accounts", icon: Briefcase },
-    { href: "/risk", label: "Risk", icon: Shield },
-    { href: "/trade-history", label: "History", icon: BarChart3 },
-    { href: "/archive", label: "Archive", icon: Archive },
-  ] : [];
+  const secondaryNavItems = [];
 
   // All nav items for mobile menu
   const allNavItems = [

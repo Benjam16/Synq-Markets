@@ -23,26 +23,6 @@ import Link from 'next/link';
 import { useAuth } from './components/AuthProvider';
 import { Market } from '@/lib/types';
 
-// Tier definitions (matching challenges page)
-const homepageTiers = [
-  { name: 'The Scout',     accountSize: 5000,   fee: 49,   payout: 500,    perks: ['Standard Terminal', 'Email Support'] },
-  { name: 'The Analyst',   accountSize: 25000,  fee: 199,  payout: 2500,   perks: ['Pro Terminal', 'Live News Feed'] },
-  { name: 'The Strategist',accountSize: 100000, fee: 549,  payout: 10000,  perks: ['Arbitrage Tools', 'Priority Payouts'], popular: true },
-  { name: 'The Whale',     accountSize: 250000, fee: 1099, payout: 25000,  perks: ['Whale Tracker', '24/7 Priority Support', 'Direct API Access'] },
-];
-
-// Simulated payout entries for the scrolling ribbon
-const payoutFeed = [
-  { trader: 'Trader_0xA3f',  account: '$5,000',   target: '10%', payout: '$500',    tier: 'Scout' },
-  { trader: 'Trader_0x7B2',  account: '$25,000',  target: '10%', payout: '$2,500',  tier: 'Analyst' },
-  { trader: 'Trader_0xE91',  account: '$100,000', target: '10%', payout: '$10,000', tier: 'Strategist' },
-  { trader: 'Trader_0xC44',  account: '$250,000', target: '10%', payout: '$25,000', tier: 'Whale' },
-  { trader: 'Trader_0xF08',  account: '$100,000', target: '10%', payout: '$10,000', tier: 'Strategist' },
-  { trader: 'Trader_0xD19',  account: '$5,000',   target: '10%', payout: '$500',    tier: 'Scout' },
-  { trader: 'Trader_0xB56',  account: '$25,000',  target: '10%', payout: '$2,500',  tier: 'Analyst' },
-  { trader: 'Trader_0x2AC',  account: '$250,000', target: '10%', payout: '$25,000', tier: 'Whale' },
-];
-
 export default function LandingPage() {
   const { user } = useAuth();
   const [markets, setMarkets] = useState<Market[]>([]);
@@ -125,8 +105,8 @@ export default function LandingPage() {
             </div>
             
             <div className="hidden lg:flex items-center gap-10">
-              <Link href="/challenges" className="text-slate-400 hover:text-[#4FFFC8] font-bold text-xs uppercase tracking-widest">Evaluation</Link>
               <Link href="/markets" className="text-slate-400 hover:text-[#4FFFC8] font-bold text-xs uppercase tracking-widest">Markets</Link>
+              <Link href="/terminal" className="text-slate-400 hover:text-[#4FFFC8] font-bold text-xs uppercase tracking-widest">Terminal</Link>
               {mounted && user ? (
                 <Link href="/dashboard" className="px-8 py-3 bg-[#4FFFC8] text-black font-black rounded-full text-xs uppercase tracking-widest shadow-[0_0_20px_rgba(79,255,200,0.3)]">Dashboard</Link>
               ) : (
@@ -276,16 +256,16 @@ export default function LandingPage() {
             className="max-w-6xl w-full flex flex-col items-center text-center relative z-10"
           >
             <div className="inline-block px-4 py-1.5 rounded-full bg-[#0f0f0f]/80 border border-[#1A1A1A] text-[#4FFFC8] text-[8px] font-black tracking-[0.3em] uppercase mb-6">
-              The Next Generation of Funding
+              Onchain Multi‑Venue Trading Terminal
             </div>
             
             <h1 className="text-5xl md:text-6xl font-black text-white mb-8 leading-tight tracking-[-0.05em] uppercase">
-              Trade Predictions<br />
-              <span className="text-gradient-cyan-indigo">With Our Capital</span>
+              Trade Stocks, Memes,<br />
+              <span className="text-gradient-cyan-indigo">Tokens & Prediction Markets</span>
             </h1>
             
             <p className="text-lg md:text-xl text-slate-400 mb-12 max-w-3xl leading-relaxed font-medium">
-              Join the world's elite event traders. Pass the evaluation and unlock up to $250,000 in buying power. Keep 80% of every dollar you generate.
+              Connect to Kalshi, Polymarket, and onchain venues from a single interface. Watch flows, prices, and opportunities update in real time across your entire watchlist.
             </p>
             
             <div className="flex flex-col md:flex-row gap-4 justify-center items-center w-full mb-8">
@@ -293,17 +273,9 @@ export default function LandingPage() {
                 href={mounted && user ? "/terminal" : "/login"}
                 className="w-full md:w-auto px-12 py-5 bg-[#4FFFC8] hover:bg-[#3debb8] text-black font-black rounded-full transition-all hover:scale-[1.02] shadow-[0_0_20px_rgba(79,255,200,0.3)] text-lg uppercase tracking-tighter flex items-center gap-3"
               >
-                {mounted && user ? "Enter Terminal" : "Start Evaluation"}
+                {mounted && user ? "Enter Terminal" : "Open Terminal"}
                 <ArrowRight className="w-5 h-5" />
               </Link>
-              {(!mounted || !user) && (
-              <Link
-                href="/challenges"
-                className="w-full md:w-auto px-12 py-5 bg-transparent border border-[#1A1A1A] hover:border-[#4FFFC8]/30 text-white font-black rounded-full transition-all hover:bg-[#4FFFC8]/5 text-lg uppercase tracking-tighter"
-              >
-                  View Tiers
-                </Link>
-              )}
             </div>
           </motion.div>
 
@@ -626,117 +598,23 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* --- CHALLENGE TIERS --- */}
+        {/* --- CHALLENGE TIERS (deprecated in terminal pivot) --- */}
+        {false && (
         <section className="w-full py-20 border-t border-[#1A1A1A] flex flex-col items-center">
           <div className="max-w-6xl w-full px-6 mx-auto flex flex-col items-center">
             <div className="flex flex-col items-center text-center mb-12">
-              <h2 className="text-2xl font-black text-white mb-4 tracking-[-0.05em] uppercase">Choose Your Tier</h2>
+              <h2 className="text-2xl font-black text-white mb-4 tracking-[-0.05em] uppercase">Choose Your Workspace</h2>
               <div className="h-1.5 w-32 bg-[#4FFFC8] rounded-full mb-4" />
-              <p className="text-slate-400 text-lg font-medium max-w-2xl">Select the account size that matches your trading level. Hit the 10% profit target and keep 80% of every dollar you generate.</p>
+              <p className="text-slate-400 text-lg font-medium max-w-2xl">Customize the tools and layouts that match your trading style. Build views for stocks, meme coins, tokens, and prediction markets in one place.</p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
-              {homepageTiers.map((tier, idx) => (
-                <motion.div
-                  key={tier.name}
-                  initial={{ opacity: 0, y: 30 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: idx * 0.1 }}
-                  className="relative group"
-                >
-                  {/* Popular badge */}
-                  {tier.popular && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20">
-                      <span className="px-4 py-1 bg-[#4FFFC8] text-black text-[8px] font-black uppercase tracking-[0.2em] rounded-full shadow-[0_0_16px_rgba(79,255,200,0.35)]">
-                        Most Popular
-                      </span>
-                    </div>
-                  )}
-
-                  <div className={`relative overflow-hidden h-full flex flex-col p-8 rounded-2xl border transition-all duration-300 ${
-                    tier.popular
-                      ? 'bg-[#0a0a0a] border-[#4FFFC8]/30 shadow-[0_0_30px_rgba(79,255,200,0.08)]'
-                      : 'bg-[#0a0a0a]/80 border-[#1A1A1A] hover:border-[#4FFFC8]/20'
-                  }`}>
-                    {/* Watermark */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
-                      <span className="text-[120px] font-black font-mono text-white/[0.015] leading-none tracking-tighter">
-                        {tier.accountSize >= 1000 ? `${tier.accountSize / 1000}K` : tier.accountSize}
-                      </span>
-                    </div>
-
-                    {/* Tier label */}
-                    <div className="text-[9px] font-black uppercase tracking-[0.35em] text-slate-500 mb-3 text-center relative z-10">
-                      {tier.name}
-                    </div>
-
-                    {/* Account size */}
-                    <div className="text-center mb-2 relative z-10">
-                      <span className="text-4xl font-black text-white tracking-tighter">
-                        ${tier.accountSize >= 1000 ? `${tier.accountSize / 1000}K` : tier.accountSize}
-                      </span>
-                    </div>
-
-                    {/* Target payout */}
-                    <div className="text-center mb-6 relative z-10">
-                      <span className="text-[10px] text-[#4FFFC8] font-bold uppercase tracking-wider">
-                        10% Target → ${tier.payout.toLocaleString()} Payout
-                      </span>
-                    </div>
-
-                    {/* Divider */}
-                    <div className="h-px w-full bg-white/5 mb-5" />
-
-                    {/* Specs */}
-                    <div className="space-y-3 mb-6 relative z-10 flex-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500 font-medium">Entry Fee</span>
-                        <span className="text-white font-black">${tier.fee}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500 font-medium">Max Drawdown</span>
-                        <span className="text-white font-black">10%</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500 font-medium">Daily Loss Cap</span>
-                        <span className="text-white font-black">5%</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500 font-medium">Profit Split</span>
-                        <span className="text-[#4FFFC8] font-black">80%</span>
-                      </div>
-                    </div>
-
-                    {/* Perks */}
-                    <div className="space-y-2 mb-6 relative z-10">
-                      {tier.perks.map((perk) => (
-                        <div key={perk} className="flex items-center gap-2 text-[11px] text-slate-400">
-                          <CheckCircle2 className="w-3 h-3 text-[#4FFFC8] flex-shrink-0" />
-                          <span>{perk}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* CTA */}
-                    <Link
-                      href="/challenges"
-                      className={`w-full py-3.5 rounded-full text-center text-xs font-black uppercase tracking-widest transition-all relative z-10 block ${
-                        tier.popular
-                          ? 'bg-[#4FFFC8] text-black shadow-[0_0_20px_rgba(79,255,200,0.3)] hover:brightness-110'
-                          : 'border border-[#1A1A1A] text-white hover:border-[#4FFFC8]/30 hover:bg-[#4FFFC8]/5'
-                      }`}
-                    >
-                      Start Challenge
-                    </Link>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+            {/* Tier cards removed in terminal pivot */}
           </div>
         </section>
+        )}
 
-        {/* --- LIVE EVALUATION PROGRESS RIBBON --- */}
+        {/* --- LIVE EVALUATION PROGRESS RIBBON (deprecated in terminal pivot) --- */}
+        {false && (
         <section className="w-full py-10 border-t border-[#1A1A1A] overflow-hidden">
           <div className="flex flex-col items-center mb-6">
             <div className="flex items-center gap-2">
@@ -752,59 +630,10 @@ export default function LandingPage() {
             <div className="absolute left-0 top-0 bottom-0 w-24 bg-gradient-to-r from-[#050505] to-transparent z-10 pointer-events-none" />
             <div className="absolute right-0 top-0 bottom-0 w-24 bg-gradient-to-l from-[#050505] to-transparent z-10 pointer-events-none" />
 
-            {/* First ribbon row — scrolls left */}
-            <div className="flex animate-scroll-left mb-3">
-              {[...payoutFeed, ...payoutFeed].map((entry, i) => (
-                <div
-                  key={`row1-${i}`}
-                  className="flex-shrink-0 mx-2 flex items-center gap-3 px-5 py-3 bg-[#0a0a0a]/80 border border-[#1A1A1A] rounded-xl backdrop-blur-sm"
-                >
-                  <div className="w-8 h-8 rounded-full bg-[#4FFFC8]/10 border border-[#4FFFC8]/20 flex items-center justify-center flex-shrink-0">
-                    <DollarSign className="w-4 h-4 text-[#4FFFC8]" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500 font-mono">{entry.trader}</span>
-                    <span className="text-xs text-white font-bold whitespace-nowrap">
-                      {entry.account} Account — {entry.target} Target Hit
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 ml-2">
-                    <span className="text-sm font-black text-[#4FFFC8] whitespace-nowrap">{entry.payout}</span>
-                    <span className="text-[8px] px-2 py-0.5 rounded-full bg-[#4FFFC8]/10 text-[#4FFFC8] font-bold uppercase tracking-wider border border-[#4FFFC8]/20 whitespace-nowrap">
-                      Processing
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Second ribbon row — scrolls right (reverse) */}
-            <div className="flex animate-scroll-right">
-              {[...payoutFeed.slice().reverse(), ...payoutFeed.slice().reverse()].map((entry, i) => (
-                <div
-                  key={`row2-${i}`}
-                  className="flex-shrink-0 mx-2 flex items-center gap-3 px-5 py-3 bg-[#0a0a0a]/80 border border-[#1A1A1A] rounded-xl backdrop-blur-sm"
-                >
-                  <div className="w-8 h-8 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-500 font-mono">{entry.trader}</span>
-                    <span className="text-xs text-white font-bold whitespace-nowrap">
-                      {entry.tier} Tier — {entry.account} Funded
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 ml-2">
-                    <span className="text-sm font-black text-emerald-400 whitespace-nowrap">{entry.payout}</span>
-                    <span className="text-[8px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-bold uppercase tracking-wider border border-emerald-500/20 whitespace-nowrap">
-                      Paid Out
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {/* Evaluation payout ribbons removed in terminal pivot */}
           </div>
         </section>
+        )}
 
         {/* --- PLATFORM PILLARS --- */}
         <section className="w-full py-20 border-t border-[#1A1A1A] flex flex-col items-center">
@@ -828,7 +657,7 @@ export default function LandingPage() {
 
               <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
                 <PieChart className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Education &amp; Prop Firm Logic</h3>
+                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Education &amp; Trading Strategy</h3>
                 <p className="text-slate-500 text-sm font-medium leading-relaxed">
                   Bridging the gap between learning and earning. Our platform offers a structured educational path paired
                   with simulated funding challenges. Master risk management, hit your profit targets, and earn funded seats

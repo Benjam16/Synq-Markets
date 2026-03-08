@@ -543,7 +543,7 @@ export default function TerminalPage() {
       } else {
         const errMsg = data.error || 'Trade failed';
         if (errMsg.includes('No active challenge')) {
-          toast.error('No active challenge — purchase one first');
+          toast.error('Live trading from this terminal is not enabled for your account.');
         } else if (errMsg.includes('Insufficient')) {
           toast.error('Insufficient balance for this trade');
         } else {

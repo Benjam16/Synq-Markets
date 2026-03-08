@@ -25,8 +25,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Prop Market - Professional Prediction Market Funding",
-  description: "Institutional-grade prediction market prop trading platform",
+  title: "Prop Market – Onchain Trading Terminal",
+  description: "Real-time onchain terminal for stocks, meme coins, tokens, and prediction markets across venues like Kalshi and Polymarket.",
 };
 
 export const viewport: Viewport = {
