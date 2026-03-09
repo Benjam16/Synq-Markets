@@ -150,7 +150,7 @@ export default function RiskDisclosurePage() {
             
             <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-8">
               <p className="text-slate-300 leading-relaxed mb-4">
-                PROP MARKET LTD. makes no representations or warranties regarding:
+                Synq makes no representations or warranties regarding:
               </p>
               <ul className="list-disc list-inside text-slate-400 space-y-2 ml-4">
                 <li>The likelihood of passing any challenge</li>

@@ -1,21 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getClient } from "@/lib/db";
+import { getClient, query } from "@/lib/db";
+
+async function resolveUserId(userId: string | null, wallet: string | null): Promise<number | null> {
+  if (userId && !Number.isNaN(Number(userId))) return Number(userId);
+  if (!wallet || !process.env.DATABASE_URL) return null;
+  try {
+    const res = await query<{ id: number }>(`SELECT id FROM users WHERE wallet_address = $1 LIMIT 1`, [wallet]);
+    return res.rows.length > 0 ? res.rows[0].id : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(req: NextRequest) {
   const userId = req.nextUrl.searchParams.get("userId");
+  const wallet = req.nextUrl.searchParams.get("wallet");
   const marketId = req.nextUrl.searchParams.get("marketId");
 
-  if (!userId) {
+  const resolvedId = await resolveUserId(userId, wallet || null);
+  if (resolvedId == null) {
     return NextResponse.json(
-      { error: "userId is required" },
-      { status: 400 },
+      userId || wallet ? { positions: [] } : { error: "userId or wallet is required" },
+      { status: userId || wallet ? 200 : 400 },
     );
   }
 
   const client = await getClient();
 
   try {
-    // Get user's subscription
     const subRes = await client.query(
       `
       SELECT id
@@ -24,7 +36,7 @@ export async function GET(req: NextRequest) {
       ORDER BY started_at DESC
       LIMIT 1;
       `,
-      [Number(userId)],
+      [resolvedId],
     );
 
     if (subRes.rows.length === 0) {

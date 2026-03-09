@@ -1,9 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
-import { AuthProvider } from "./components/AuthProvider";
 import Layout from "./components/Layout";
-import PortalLoader from "./components/PortalLoader";
+import ClientWalletProvidersWrapper from "./components/ClientWalletProvidersWrapper";
 import { Suspense } from "react";
 
 const geistSans = Geist({
@@ -25,7 +24,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Prop Market – Onchain Trading Terminal",
+  title: "Synq – Onchain Trading Terminal",
   description: "Real-time onchain terminal for stocks, meme coins, tokens, and prediction markets across venues like Kalshi and Polymarket.",
 };
 
@@ -50,15 +49,13 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${inter.variable} antialiased`}
       >
-        <AuthProvider>
-          <PortalLoader>
-            <Layout>
-              <Suspense fallback={null}>
-                {children}
-              </Suspense>
-            </Layout>
-          </PortalLoader>
-        </AuthProvider>
+        <ClientWalletProvidersWrapper>
+          <Layout>
+            <Suspense fallback={null}>
+              {children}
+            </Suspense>
+          </Layout>
+        </ClientWalletProvidersWrapper>
       </body>
     </html>
   );

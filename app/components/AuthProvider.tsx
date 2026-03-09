@@ -1,14 +1,20 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase-client';
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useWallet } from '@solana/wallet-adapter-react';
 import { useRouter } from 'next/navigation';
 import { setUserContext, clearUserContext, captureError } from '@/lib/error-reporting';
 
+/** Wallet-based user for compatibility with existing useAuth() consumers */
+export interface WalletUser {
+  id: string;
+  address: string;
+  email: string; // same as address for display (e.g. truncated)
+}
+
 interface AuthContextType {
-  user: User | null;
-  session: Session | null;
+  user: WalletUser | null;
+  session: { wallet: string } | null;
   loading: boolean;
   signOut: () => Promise<void>;
 }
@@ -21,85 +27,49 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const { publicKey, connected, disconnect, connecting, disconnecting } = useWallet();
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
+  const user: WalletUser | null = publicKey && connected
+    ? {
+        id: publicKey.toBase58(),
+        address: publicKey.toBase58(),
+        email: `${publicKey.toBase58().slice(0, 4)}...${publicKey.toBase58().slice(-4)}`,
+      }
+    : null;
+
+  const session = user ? { wallet: user.address } : null;
+
   useEffect(() => {
-    // Check if Supabase is properly configured
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseKey || 
-        supabaseUrl === 'https://placeholder.supabase.co' || 
-        supabaseKey === 'placeholder-key') {
-      // Supabase not configured, skip auth
+    setLoading(connecting || disconnecting);
+  }, [connecting, disconnecting]);
+
+  useEffect(() => {
+    if (!connecting && !disconnecting) {
       setLoading(false);
-      return;
     }
+  }, [connected, connecting, disconnecting]);
 
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        captureError(error, { context: 'AuthProvider.getSession' });
-        setLoading(false);
-        return;
-      }
-      setSession(session);
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      
-      // Set Sentry user context
-      if (currentUser) {
-        setUserContext(currentUser.id, currentUser.email, {
-          user_metadata: currentUser.user_metadata,
-        });
-      } else {
-        clearUserContext();
-      }
-      
-      setLoading(false);
-    }).catch((error) => {
-      captureError(error, { context: 'AuthProvider.getSession.catch' });
-      setLoading(false);
-    });
+  useEffect(() => {
+    if (user) {
+      setUserContext(user.id, user.address, { wallet: user.address });
+    } else {
+      clearUserContext();
+    }
+  }, [user?.id]);
 
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      
-      // Update Sentry user context
-      if (currentUser) {
-        setUserContext(currentUser.id, currentUser.email, {
-          user_metadata: currentUser.user_metadata,
-        });
-      } else {
-        clearUserContext();
-      }
-      
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     try {
-      await supabase.auth.signOut();
-      clearUserContext(); // Clear Sentry user context on sign out
+      await disconnect();
+      clearUserContext();
       router.push('/login');
     } catch (error) {
       captureError(error, { context: 'AuthProvider.signOut' });
       clearUserContext();
-      // Still redirect even if signout fails
       router.push('/login');
     }
-  };
+  }, [disconnect, router]);
 
   return (
     <AuthContext.Provider value={{ user, session, loading, signOut }}>
@@ -115,4 +85,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

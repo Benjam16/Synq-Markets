@@ -7,27 +7,17 @@ export async function GET(req: NextRequest) {
     // Check admin authorization
     let admin = await checkAdminAuth(req);
     
-    // Fallback: Check by email from query param if session auth fails
+    // Fallback: check wallet from query
     if (!admin) {
-      const email = req.nextUrl.searchParams.get("email");
-      
-      if (email) {
-        const result = await query(
-          `SELECT id, email, role FROM users WHERE LOWER(TRIM(email)) = $1`,
-          [email.trim().toLowerCase()]
-        );
-        
-        if (result.rows.length > 0 && (result.rows[0].role === "admin" || result.rows[0].role === "risk")) {
-          admin = {
-            id: result.rows[0].id,
-            email: result.rows[0].email,
-            role: result.rows[0].role,
-          };
-          console.log('[Admin Trades] Authenticated via email fallback:', admin.email);
+      const wallet = req.nextUrl.searchParams.get("wallet")?.trim();
+      if (wallet) {
+        const list = process.env.ADMIN_WALLET_ADDRESSES;
+        if (list && list.split(",").map((w) => w.trim().toLowerCase()).includes(wallet.toLowerCase())) {
+          admin = { id: wallet, email: wallet, role: "admin" };
         }
       }
     }
-    
+
     if (!admin) {
       console.log('[Admin Trades] Access denied - not an admin');
       return NextResponse.json(

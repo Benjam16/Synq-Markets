@@ -246,19 +246,12 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
 
     const fetchPositions = async () => {
       try {
-        let userId: number | null = null;
-        const getUserRes = await fetch(`/api/user?email=${encodeURIComponent(user.email || '')}`);
-        if (getUserRes.ok) {
-          const { user: dbUser } = await getUserRes.json();
-          userId = dbUser.id;
-        }
-
-        if (!userId) {
+        const wallet = user?.address;
+        if (!wallet) {
           setUserPositions([]);
           return;
         }
-
-        const res = await fetch(`/api/positions?userId=${userId}&marketId=${selectedMarket.id || selectedMarket.conditionId}`);
+        const res = await fetch(`/api/positions?wallet=${encodeURIComponent(wallet)}&marketId=${selectedMarket.id || selectedMarket.conditionId}`);
         if (res.ok) {
           const data = await res.json();
           setUserPositions(data.positions || []);
@@ -353,68 +346,18 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
     setTradeStatus('processing');
 
     try {
-      // Ensure we have the user's email
-      if (!user.email) {
+      const wallet = user?.address;
+      if (!wallet) {
         setTradeStatus('error');
-        toast.error('No email found — please sign in again');
+        toast.error('Wallet not connected — please connect your wallet');
         return;
       }
 
-      // Get or create user ID from database
-      let userId: number | null = null;
-
-      // Step 1: Try to get existing user
-      try {
-        const getUserRes = await fetch(`/api/user?email=${encodeURIComponent(user.email)}`);
-      if (getUserRes.ok) {
-        const { user: dbUser } = await getUserRes.json();
-          userId = dbUser?.id ?? null;
-        } else if (getUserRes.status === 404) {
-          // User not found — will create below
-      } else {
-          // Server error — log but still try to create
-          const errData = await getUserRes.json().catch(() => ({}));
-          console.warn('[Trade] GET /api/user failed:', getUserRes.status, errData);
-        }
-      } catch (fetchErr) {
-        console.warn('[Trade] GET /api/user network error:', fetchErr);
-      }
-
-      // Step 2: If user not found, create them
-      if (!userId) {
-        try {
-        const createRes = await fetch('/api/user', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            supabaseUserId: user.id,
-            email: user.email,
-              fullName: user.user_metadata?.full_name || user.email.split('@')[0],
-          }),
-        });
-        if (createRes.ok) {
-            const data = await createRes.json();
-            userId = data.userId ?? data.user?.id ?? null;
-          } else {
-            const errData = await createRes.json().catch(() => ({}));
-            console.error('[Trade] POST /api/user failed:', createRes.status, errData);
-            setTradeStatus('error');
-            toast.error(errData.error || `Account setup failed (${createRes.status})`);
-            return;
-          }
-        } catch (createErr) {
-          console.error('[Trade] POST /api/user network error:', createErr);
-          setTradeStatus('error');
-          toast.error('Network error — please check your connection');
-          return;
-        }
-      }
-
-      if (!userId) {
-        setTradeStatus('error');
-        toast.error('Could not set up your account — please refresh and try again');
-        return;
-      }
+      await fetch('/api/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet }),
+      }).catch(() => {});
 
       // Use the tradeSide state (set when clicking Buy Yes/No buttons)
       // This ensures "Buy No" on a candidate trades "No" on that candidate, not a generic "No" outcome
@@ -448,7 +391,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: userId,
+          wallet,
           marketId: marketIdForTrade,
           provider: provLower,
           side: side,
@@ -525,7 +468,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
         }
         
         // Refresh positions in background (non-blocking)
-        fetch(`/api/positions?userId=${userId}&marketId=${selectedMarket.id || selectedMarket.conditionId}`)
+        fetch(`/api/positions?wallet=${encodeURIComponent(wallet)}&marketId=${selectedMarket.id || selectedMarket.conditionId}`)
           .then(res => res.ok ? res.json() : null)
           .then(posData => {
             if (posData?.positions) {

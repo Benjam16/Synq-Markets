@@ -1,83 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+function getWallet(req: NextRequest): string | null {
+  const wallet =
+    req.headers.get("x-wallet-address")?.trim() ||
+    req.nextUrl.searchParams.get("wallet")?.trim();
+  return wallet || null;
+}
 
-// Get notifications for a user
 export async function GET(req: NextRequest) {
   try {
-    // Get user from session
-    // For server-side, use simple client without cookie handling
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    
-    // Get auth token from cookies manually
-    const cookieStore = await cookies();
-    const authToken = cookieStore.get('sb-access-token')?.value || 
-                      cookieStore.get('supabase-auth-token')?.value;
-    
-    if (authToken) {
-      supabase.auth.setSession({ access_token: authToken, refresh_token: '' } as any);
-    }
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user?.email) {
+    const wallet = getWallet(req);
+    if (!wallet) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get user ID from database
+    if (!process.env.DATABASE_URL) {
+      return NextResponse.json({ notifications: [], unreadCount: 0 });
+    }
+
     const userRes = await query<{ id: number }>(
-      `SELECT id FROM users WHERE email = $1`,
-      [user.email]
-    );
+      `SELECT id FROM users WHERE wallet_address = $1 LIMIT 1`,
+      [wallet]
+    ).catch(() => ({ rows: [] as { id: number }[] }));
 
     if (userRes.rows.length === 0) {
       return NextResponse.json({ notifications: [], unreadCount: 0 });
     }
 
     const userId = userRes.rows[0].id;
-
-    // Get query parameters
     const limit = parseInt(req.nextUrl.searchParams.get("limit") || "50", 10);
     const offset = parseInt(req.nextUrl.searchParams.get("offset") || "0", 10);
     const unreadOnly = req.nextUrl.searchParams.get("unreadOnly") === "true";
     const type = req.nextUrl.searchParams.get("type");
 
-    // Build query
     let sql = `
-      SELECT 
-        id,
-        type,
-        title,
-        message,
-        data,
-        read,
-        created_at
+      SELECT id, type, title, message, data, read, created_at
       FROM notifications
       WHERE user_id = $1
     `;
-
-    const params: any[] = [userId];
+    const params: unknown[] = [userId];
     let paramCount = 2;
-
-    if (unreadOnly) {
-      sql += ` AND read = false`;
-    }
-
+    if (unreadOnly) sql += ` AND read = false`;
     if (type) {
       sql += ` AND type = $${paramCount}`;
       params.push(type);
       paramCount++;
     }
-
     sql += ` ORDER BY created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
     params.push(limit, offset);
 
     const result = await query(sql, params);
-
-    // Get unread count
     const unreadCountRes = await query<{ count: string }>(
       `SELECT COUNT(*) as count FROM notifications WHERE user_id = $1 AND read = false`,
       [userId]
@@ -96,7 +69,7 @@ export async function GET(req: NextRequest) {
       })),
       unreadCount,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("[Notifications] Error:", error);
     return NextResponse.json(
       { error: "Failed to fetch notifications" },
@@ -105,46 +78,33 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// Mark notifications as read
 export async function PATCH(req: NextRequest) {
   try {
-    // For server-side, use simple client without cookie handling
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    
-    // Get auth token from cookies manually
-    const cookieStore = await cookies();
-    const authToken = cookieStore.get('sb-access-token')?.value || 
-                      cookieStore.get('supabase-auth-token')?.value;
-    
-    if (authToken) {
-      supabase.auth.setSession({ access_token: authToken, refresh_token: '' } as any);
-    }
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user?.email) {
+    const wallet = getWallet(req);
+    if (!wallet) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if (!process.env.DATABASE_URL) {
+      return NextResponse.json({ success: true });
+    }
+
     const userRes = await query<{ id: number }>(
-      `SELECT id FROM users WHERE email = $1`,
-      [user.email]
-    );
+      `SELECT id FROM users WHERE wallet_address = $1 LIMIT 1`,
+      [wallet]
+    ).catch(() => ({ rows: [] as { id: number }[] }));
 
     if (userRes.rows.length === 0) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      return NextResponse.json({ success: true });
     }
 
     const userId = userRes.rows[0].id;
-    const { notificationIds, markAllRead } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { notificationIds, markAllRead } = body;
 
     if (markAllRead) {
-      // Mark all as read
-      await query(
-        `UPDATE notifications SET read = true WHERE user_id = $1 AND read = false`,
-        [userId]
-      );
-    } else if (notificationIds && Array.isArray(notificationIds)) {
-      // Mark specific notifications as read
+      await query(`UPDATE notifications SET read = true WHERE user_id = $1 AND read = false`, [userId]);
+    } else if (Array.isArray(notificationIds)) {
       await query(
         `UPDATE notifications SET read = true WHERE user_id = $1 AND id = ANY($2::bigint[])`,
         [userId, notificationIds]
@@ -154,7 +114,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error("[Notifications] Error marking as read:", error);
     return NextResponse.json(
       { error: "Failed to update notifications" },

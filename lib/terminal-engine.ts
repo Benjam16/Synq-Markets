@@ -521,7 +521,7 @@ const ANON_RE = /\b(Person|Player|Company|Team|Candidate|Entity)\s+[A-Z]\b/i;
 async function fetchPolymarketLiveTrades(): Promise<TerminalTrade[]> {
   const opts = {
     method: 'GET' as const,
-    headers: { 'Accept': 'application/json', 'User-Agent': 'PropMarket/1.0', 'Cache-Control': 'no-cache' },
+    headers: { 'Accept': 'application/json', 'User-Agent': 'Synq/1.0', 'Cache-Control': 'no-cache' },
     cache: 'no-store' as const,
     signal: AbortSignal.timeout(8000),
   };

@@ -25,74 +25,54 @@ function PortalContent() {
   const [paypalEmail, setPaypalEmail] = useState("");
   const [currentEmail, setCurrentEmail] = useState("");
   
-  // Password state
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  
   // Support state
   const [supportSubject, setSupportSubject] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
   const [sendingSupport, setSendingSupport] = useState(false);
 
-  // Get user data
+  // Get user data by wallet
   useEffect(() => {
     const loadUserData = async () => {
-      if (!user?.email) {
+      if (!user?.address) {
         setLoading(false);
         return;
       }
-
-      // Set email immediately from auth user (fallback)
       setCurrentEmail(user.email);
 
       try {
-        // Get database user ID
-        const getUserRes = await fetch(`/api/user?email=${encodeURIComponent(user.email)}`);
+        const getUserRes = await fetch(`/api/user?wallet=${encodeURIComponent(user.address)}`);
         if (getUserRes.ok) {
           const { user: dbUser } = await getUserRes.json();
           if (dbUser) {
-            setDbUserId(dbUser.id);
+            setDbUserId(typeof dbUser.dbId === 'number' ? dbUser.dbId : (typeof dbUser.id === 'number' ? dbUser.id : null));
             setFullName(dbUser.full_name || "");
             setPaypalEmail(dbUser.paypal_email || "");
-            // Use database email if available, otherwise use auth email
-            setCurrentEmail(dbUser.email || user.email);
           }
-        } else {
-          // If user doesn't exist in DB, try to create them
-          console.log("[Portal] User not found in database, attempting to create...");
-          const createRes = await fetch('/api/user', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              supabaseUserId: user.id,
-              email: user.email,
-              fullName: user.user_metadata?.full_name || user.email.split('@')[0],
-            }),
-          });
-          
-          if (createRes.ok) {
-            const { userId } = await createRes.json();
-            setDbUserId(userId);
-          }
+        }
+        const createRes = await fetch('/api/user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet: user.address }),
+        });
+        if (createRes.ok) {
+          const data = await createRes.json();
+          const id = data.userId;
+          if (typeof id === 'number') setDbUserId(id);
         }
       } catch (error) {
         console.error("Failed to load user data:", error);
-        // Even on error, we have the email from auth
-        setCurrentEmail(user.email);
       } finally {
         setLoading(false);
       }
     };
-
     loadUserData();
   }, [user]);
 
-  const handleCopyUserId = () => {
-    if (dbUserId) {
-      navigator.clipboard.writeText(String(dbUserId));
+  const handleCopyWallet = () => {
+    if (user?.address) {
+      navigator.clipboard.writeText(user.address);
       setCopied(true);
-      toast.success("User ID copied to clipboard", {
+      toast.success("Wallet address copied to clipboard", {
         style: {
           background: "#10b981",
           color: "#ffffff",
@@ -105,7 +85,7 @@ function PortalContent() {
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dbUserId) return;
+    if (!user?.address) return;
 
     setSaving(true);
     try {
@@ -113,7 +93,7 @@ function PortalContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: dbUserId,
+          wallet: user.address,
           fullName,
           paypalEmail,
         }),
@@ -152,79 +132,6 @@ function PortalContent() {
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (newPassword !== confirmPassword) {
-      toast.error("New passwords do not match", {
-        style: {
-          background: "#ef4444",
-          color: "#ffffff",
-          border: "1px solid #dc2626",
-        },
-      });
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      toast.error("Password must be at least 6 characters", {
-        style: {
-          background: "#ef4444",
-          color: "#ffffff",
-          border: "1px solid #dc2626",
-        },
-      });
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const res = await fetch("/api/portal/change-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentPassword,
-          newPassword,
-          userEmail: currentEmail,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        toast.success("Password changed successfully", {
-          style: {
-            background: "#10b981",
-            color: "#ffffff",
-            border: "1px solid #059669",
-          },
-        });
-        setCurrentPassword("");
-        setNewPassword("");
-        setConfirmPassword("");
-      } else {
-        toast.error(data.error || "Failed to change password", {
-          style: {
-            background: "#ef4444",
-            color: "#ffffff",
-            border: "1px solid #dc2626",
-          },
-        });
-      }
-    } catch (error) {
-      console.error("Error changing password:", error);
-      toast.error("Failed to change password", {
-        style: {
-          background: "#ef4444",
-          color: "#ffffff",
-          border: "1px solid #dc2626",
-        },
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleContactSupport = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -245,7 +152,7 @@ function PortalContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: dbUserId,
+          wallet: user?.address,
           email: currentEmail,
           subject: supportSubject,
           message: supportMessage,
@@ -302,7 +209,7 @@ function PortalContent() {
         {/* Header - Full Width */}
         <div className="mb-8">
           <Link
-            href="/dashboard"
+            href="/terminal"
             className="inline-flex items-center gap-2 text-slate-500 hover:text-white transition-colors mb-4 text-sm"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -396,7 +303,7 @@ function PortalContent() {
               </form>
             </motion.div>
 
-            {/* Card 2: Security */}
+            {/* Card 2: Security (wallet-only; no password) */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -406,71 +313,9 @@ function PortalContent() {
               <div className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-6">
                 Security
               </div>
-
-              <form onSubmit={handleChangePassword} className="flex flex-col flex-1">
-                <div className="space-y-4 flex-1">
-                  <div>
-                    <label className="block text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">
-                      Current Password
-                    </label>
-                    <input
-                      type="password"
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                      className="w-full px-4 py-3 bg-white/[0.03] border border-white/10 rounded-xl text-white placeholder:text-slate-500 focus:outline-none focus:border-[#4FFFC8] focus:shadow-[0_0_0_3px_rgba(79,255,200,0.1)] transition-all"
-                      placeholder="Enter current password"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">
-                      New Password
-                    </label>
-                    <input
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full px-4 py-3 bg-white/[0.03] border border-white/10 rounded-xl text-white placeholder:text-slate-500 focus:outline-none focus:border-[#4FFFC8] focus:shadow-[0_0_0_3px_rgba(79,255,200,0.1)] transition-all"
-                      placeholder="Enter new password (min 6 characters)"
-                      required
-                      minLength={6}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">
-                      Confirm New Password
-                    </label>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full px-4 py-3 bg-white/[0.03] border border-white/10 rounded-xl text-white placeholder:text-slate-500 focus:outline-none focus:border-[#4FFFC8] focus:shadow-[0_0_0_3px_rgba(79,255,200,0.1)] transition-all"
-                      placeholder="Confirm new password"
-                      required
-                      minLength={6}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end mt-6">
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="border border-[#4FFFC8]/20 text-[#4FFFC8] bg-[#4FFFC8]/5 px-6 py-3 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-[#4FFFC8] hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    {saving ? (
-                      <>
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>UPDATING...</span>
-                      </>
-                    ) : (
-                      <span>UPDATE PASSWORD</span>
-                    )}
-                  </button>
-                </div>
-              </form>
+              <p className="text-sm text-slate-400">
+                You’re signed in with your Solana wallet. Disconnect from the app or lock your wallet to sign out. There is no password to change.
+              </p>
             </motion.div>
           </div>
 
@@ -497,17 +342,17 @@ function PortalContent() {
                 </div>
                 <div>
                   <div className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">
-                    User ID
+                    Wallet address
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="text-sm text-white font-mono">
-                      {dbUserId ? String(dbUserId) : (loading ? "Loading..." : "Not assigned")}
+                    <div className="text-sm text-white font-mono truncate max-w-[200px]">
+                      {user?.address ? `${user.address.slice(0, 6)}...${user.address.slice(-4)}` : (loading ? "Loading..." : "—")}
                     </div>
-                    {dbUserId && (
+                    {user?.address && (
                       <button
-                        onClick={handleCopyUserId}
+                        onClick={handleCopyWallet}
                         className="p-1.5 text-slate-500 hover:text-[#4FFFC8] transition-colors"
-                        title="Copy User ID"
+                        title="Copy wallet address"
                       >
                         {copied ? (
                           <CheckCircle2 className="w-4 h-4 text-[#4FFFC8]" />

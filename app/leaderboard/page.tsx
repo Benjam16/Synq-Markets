@@ -39,9 +39,9 @@ export default function LeaderboardPage() {
 
   const generateShareText = (leader?: Leader) => {
     if (leader) {
-      return `🏆 Check out ${leader.tradingAlias} on the Prop Market Leaderboard! ${leader.roi.toFixed(2)}% ROI! 🚀\n\nView the full leaderboard: ${typeof window !== 'undefined' ? window.location.origin : ''}/leaderboard`;
+      return `🏆 Check out ${leader.tradingAlias} on the Synq Leaderboard! ${leader.roi.toFixed(2)}% ROI! 🚀\n\nView the full leaderboard: ${typeof window !== 'undefined' ? window.location.origin : ''}/leaderboard`;
     }
-    return `🏆 Check out the Prop Market Leaderboard! Top traders competing for the best ROI! 🚀\n\nView the leaderboard: ${typeof window !== 'undefined' ? window.location.origin : ''}/leaderboard`;
+    return `🏆 Check out the Synq Leaderboard! Top traders competing for the best ROI! 🚀\n\nView the leaderboard: ${typeof window !== 'undefined' ? window.location.origin : ''}/leaderboard`;
   };
 
   const handleShare = async (leader?: Leader) => {
@@ -52,7 +52,7 @@ export default function LeaderboardPage() {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Prop Market Leaderboard',
+          title: 'Synq Leaderboard',
           text: text,
           url: url,
         });

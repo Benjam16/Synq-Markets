@@ -48,7 +48,7 @@ export default function InstitutionalRelationsPage() {
               <h2 className="text-3xl font-black text-white">Partner With Us</h2>
             </div>
             <p className="text-slate-300 leading-relaxed text-lg mb-6">
-              PROP MARKET LTD. offers institutional-grade trading infrastructure, risk management systems, and market access to qualified institutions, funds, and enterprise clients.
+              Synq offers institutional-grade trading infrastructure, risk management systems, and market access to qualified institutions, funds, and enterprise clients.
             </p>
             <p className="text-slate-400 leading-relaxed">
               Whether you're a hedge fund, family office, proprietary trading firm, or enterprise looking to integrate prediction market capabilities, we provide the tools, liquidity, and expertise to scale your operations.

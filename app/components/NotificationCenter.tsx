@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Bell, X, Check, CheckCheck, AlertTriangle, TrendingUp, Target, Globe, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import { useAuth } from './AuthProvider';
 
 interface Notification {
   id: number;
@@ -16,17 +17,20 @@ interface Notification {
 }
 
 export function NotificationCenter() {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Load notifications
+  const wallet = user?.address ?? '';
+
   const loadNotifications = async () => {
+    if (!wallet) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/notifications?limit=20');
+      const res = await fetch(`/api/notifications?limit=20&wallet=${encodeURIComponent(wallet)}`);
       if (res.ok) {
         const data = await res.json();
         setNotifications(data.notifications || []);
@@ -39,20 +43,16 @@ export function NotificationCenter() {
     }
   };
 
-  // Load on mount and when opened
   useEffect(() => {
+    if (!wallet) return;
     loadNotifications();
-    
-    // Poll for new notifications every 10 seconds
     const interval = setInterval(loadNotifications, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [wallet]);
 
   useEffect(() => {
-    if (isOpen) {
-      loadNotifications();
-    }
-  }, [isOpen]);
+    if (isOpen && wallet) loadNotifications();
+  }, [isOpen, wallet]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -73,8 +73,9 @@ export function NotificationCenter() {
 
   // Mark as read
   const markAsRead = async (notificationId: number) => {
+    if (!wallet) return;
     try {
-      const res = await fetch('/api/notifications', {
+      const res = await fetch(`/api/notifications?wallet=${encodeURIComponent(wallet)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notificationIds: [notificationId] }),
@@ -93,8 +94,9 @@ export function NotificationCenter() {
 
   // Mark all as read
   const markAllAsRead = async () => {
+    if (!wallet) return;
     try {
-      const res = await fetch('/api/notifications', {
+      const res = await fetch(`/api/notifications?wallet=${encodeURIComponent(wallet)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ markAllRead: true }),

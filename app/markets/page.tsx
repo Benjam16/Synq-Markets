@@ -48,12 +48,15 @@ export default function MarketsPage() {
   const [parlayPlacing, setParlayPlacing] = useState(false);
   const [dbUserId, setDbUserId] = useState<number | null>(null);
 
-  // Resolve dbUserId for parlay placement
+  // Resolve dbUserId for parlay (optional; may be numeric from DB or unused)
   useEffect(() => {
-    if (!user?.email) return;
-    fetch(`/api/user?email=${encodeURIComponent(user.email)}`)
+    if (!user?.address) return;
+    fetch(`/api/user?wallet=${encodeURIComponent(user.address)}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.user?.id) setDbUserId(d.user.id); })
+      .then(d => {
+        const id = d?.user?.dbId ?? d?.user?.id;
+        if (typeof id === 'number') setDbUserId(id);
+      })
       .catch(() => {});
   }, [user]);
 
@@ -1348,7 +1351,7 @@ export default function MarketsPage() {
             setParlaySlipOpen(true);
           }}
           onTrade={() => {
-            router.push('/dashboard');
+            router.push('/terminal');
           }}
         />
       )}

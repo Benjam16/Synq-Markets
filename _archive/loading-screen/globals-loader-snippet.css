@@ -1,0 +1,11 @@
+/* Portal loader: CRT-style text flicker (add to app/globals.css if re-enabling) */
+@keyframes crt-flicker {
+  0%, 90%, 100% { opacity: 1; }
+  92% { opacity: 0.97; }
+  94% { opacity: 1; }
+  96% { opacity: 0.98; }
+  98% { opacity: 1; }
+}
+.portal-crt-flicker {
+  animation: crt-flicker 0.15s ease-in-out infinite;
+}

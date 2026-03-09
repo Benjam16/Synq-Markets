@@ -49,7 +49,7 @@ export default function TermsOfServicePage() {
             </div>
             <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-8">
               <p className="text-slate-300 leading-relaxed">
-                By accessing and using PROP MARKET LTD. ("the Platform", "we", "us", "our"), you accept and agree to be bound by these Terms of Service. If you do not agree to these terms, you must not use the Platform. These terms constitute a legally binding agreement between you and PROP MARKET LTD.
+                By accessing and using Synq ("the Platform", "we", "us", "our"), you accept and agree to be bound by these Terms of Service. If you do not agree to these terms, you must not use the Platform. These terms constitute a legally binding agreement between you and Synq
               </p>
             </div>
           </section>
@@ -126,7 +126,7 @@ export default function TermsOfServicePage() {
               <div>
                 <h3 className="text-lg font-bold text-white mb-3">Challenge Passing</h3>
                 <p className="text-slate-300 leading-relaxed">
-                  Passing a challenge does not guarantee funding or account access. Additional verification, compliance checks, and terms may apply. PROP MARKET LTD. reserves the right to deny funding to any user at its sole discretion.
+                  Passing a challenge does not guarantee funding or account access. Additional verification, compliance checks, and terms may apply. Synq reserves the right to deny funding to any user at its sole discretion.
                 </p>
               </div>
             </div>
@@ -157,7 +157,7 @@ export default function TermsOfServicePage() {
             <h2 className="text-3xl font-black text-white mb-8 tracking-tight">5. Intellectual Property</h2>
             <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-8">
               <p className="text-slate-300 leading-relaxed mb-4">
-                All content, features, and functionality of the Platform, including but not limited to text, graphics, logos, icons, images, software, and code, are the exclusive property of PROP MARKET LTD. and are protected by copyright, trademark, and other intellectual property laws.
+                All content, features, and functionality of the Platform, including but not limited to text, graphics, logos, icons, images, software, and code, are the exclusive property of Synq and are protected by copyright, trademark, and other intellectual property laws.
               </p>
               <p className="text-slate-300 leading-relaxed">
                 You may not reproduce, distribute, modify, create derivative works of, publicly display, or otherwise use any Platform content without our express written permission.
@@ -170,7 +170,7 @@ export default function TermsOfServicePage() {
             <h2 className="text-3xl font-black text-white mb-8 tracking-tight">6. Limitation of Liability</h2>
             <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-8">
               <p className="text-slate-300 leading-relaxed mb-4">
-                TO THE MAXIMUM EXTENT PERMITTED BY LAW, PROP MARKET LTD. SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, DATA, OR USE, ARISING OUT OF OR RELATING TO YOUR USE OF THE PLATFORM.
+                TO THE MAXIMUM EXTENT PERMITTED BY LAW, Synq SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, DATA, OR USE, ARISING OUT OF OR RELATING TO YOUR USE OF THE PLATFORM.
               </p>
               <p className="text-slate-300 leading-relaxed">
                 Our total liability to you for any claims arising from or related to the Platform shall not exceed the amount you paid to us in the twelve (12) months preceding the claim.
@@ -212,7 +212,7 @@ export default function TermsOfServicePage() {
             <h2 className="text-3xl font-black text-white mb-8 tracking-tight">9. Governing Law</h2>
             <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-8">
               <p className="text-slate-300 leading-relaxed">
-                These Terms of Service shall be governed by and construed in accordance with the laws of the jurisdiction in which PROP MARKET LTD. is incorporated, without regard to its conflict of law provisions. Any disputes arising from these terms shall be resolved through binding arbitration.
+                These Terms of Service shall be governed by and construed in accordance with the laws of the jurisdiction in which Synq is incorporated, without regard to its conflict of law provisions. Any disputes arising from these terms shall be resolved through binding arbitration.
               </p>
             </div>
           </section>

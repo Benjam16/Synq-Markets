@@ -1,16 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getClient, query } from "@/lib/db";
 
-import { getClient } from "@/lib/db";
+async function resolveUserId(body: { userId?: unknown; wallet?: string }): Promise<number | null> {
+  if (body.userId != null && !Number.isNaN(Number(body.userId))) return Number(body.userId);
+  const wallet = body.wallet;
+  if (!wallet || !process.env.DATABASE_URL) return null;
+  try {
+    const res = await query<{ id: number }>(`SELECT id FROM users WHERE wallet_address = $1 LIMIT 1`, [wallet]);
+    return res.rows.length > 0 ? res.rows[0].id : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const userId = Number(body.userId);
+  const userId = await resolveUserId(body);
   const positionId = Number(body.positionId);
   const closePrice = Number(body.closePrice);
 
-  if (!userId || !positionId || Number.isNaN(closePrice)) {
+  if (userId == null || !positionId || Number.isNaN(closePrice)) {
     return NextResponse.json(
-      { error: "userId, positionId, and closePrice required" },
+      { error: "wallet (or userId), positionId, and closePrice required" },
       { status: 400 },
     );
   }
@@ -117,13 +128,6 @@ export async function POST(req: NextRequest) {
         pnl,
       });
     }
-
-    // Run risk check after closing position (async, don't wait)
-    fetch(`${req.nextUrl.origin}/api/risk-check`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId }),
-    }).catch(() => {}); // Silently fail - risk check runs periodically anyway
 
     return NextResponse.json({
       success: true,

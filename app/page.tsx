@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { 
   ArrowRight, 
@@ -12,42 +12,23 @@ import {
   BarChart3,
   Lock,
   Globe,
-  PieChart,
   Activity,
-  CheckCircle2,
   Monitor,
   Grid3x3,
-  DollarSign,
 } from 'lucide-react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useAuth } from './components/AuthProvider';
 import { Market } from '@/lib/types';
 
 export default function LandingPage() {
   const { user } = useAuth();
+  const pathname = usePathname();
   const [markets, setMarkets] = useState<Market[]>([]);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
-  // Prevent hydration mismatch
   useEffect(() => { setMounted(true); }, []);
-
-  // Mouse-follow glow — throttled to 1 update per frame
-  useEffect(() => {
-    let raf = 0;
-    const onMove = (e: MouseEvent) => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        setMousePos({ x: e.clientX, y: e.clientY });
-      });
-    };
-    window.addEventListener('mousemove', onMove, { passive: true });
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      cancelAnimationFrame(raf);
-    };
-  }, []);
 
   // --- DATA ENGINE (stable polling — no infinite loop) ---
   const prevPricesRef = useRef<Map<string, number>>(new Map());
@@ -78,18 +59,82 @@ export default function LandingPage() {
     };
 
     loadMarkets();
-    const interval = setInterval(loadMarkets, 15000);
+    // Refresh a bit more frequently so the homepage feels as live as the terminal
+    const interval = setInterval(loadMarkets, 7000);
     return () => { active = false; controller.abort(); clearInterval(interval); };
   }, []); // ← stable deps: runs once
+
+  const topMover = useMemo(() => {
+    if (loading || !markets.length) return null;
+    const sorted = [...markets].sort((a, b) => {
+      const ca = Math.abs(a.change ?? 0);
+      const cb = Math.abs(b.change ?? 0);
+      return cb - ca;
+    });
+    return sorted[0] ?? null;
+  }, [loading, markets]);
+
+  const totalVolume = useMemo(() => {
+    if (!markets.length) return 0;
+    return markets.reduce((sum, m) => sum + (m.volume ?? 0), 0);
+  }, [markets]);
+
+  const marketsLive = markets.length;
+  const formattedVolume =
+    totalVolume > 0
+      ? `$${(totalVolume / 1_000_000).toFixed(2)}M`
+      : '—';
+
+  const orderboardMarkets = useMemo(() => {
+    if (loading || !markets.length) return [];
+    // Sort by 24h volume descending so the highest-liquidity markets are surfaced first
+    const sorted = [...markets].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
+    // Show a deeper slice so the scroll area has content
+    return sorted.slice(0, 20);
+  }, [loading, markets]);
+
+  const [venueFilter, setVenueFilter] = useState<'all' | 'Polymarket' | 'Kalshi'>('all');
+  const [pingIndex, setPingIndex] = useState(0);
+
+  const filteredMarkets = useMemo(() => {
+    if (!markets.length) return [];
+    if (venueFilter === 'all') return markets;
+    return markets.filter((m) => m.provider === venueFilter);
+  }, [markets, venueFilter]);
+
+  useEffect(() => {
+    if (!orderboardMarkets.length) return;
+    const interval = setInterval(() => {
+      setPingIndex((prev) => {
+        if (!orderboardMarkets.length) return 0;
+        const len = orderboardMarkets.length;
+        let next = (prev + 1) % len;
+        // Prefer rows that actually have a 24h move so they "pop" more often
+        for (let i = 0; i < len; i++) {
+          const idx = (prev + 1 + i) % len;
+          const rawChange = orderboardMarkets[idx]?.change ?? 0;
+          if (Math.abs(rawChange) >= 0.05) {
+            next = idx;
+            break;
+          }
+        }
+        return next;
+      });
+    }, 2200);
+    return () => clearInterval(interval);
+  }, [orderboardMarkets]);
+
+  const isMarketsActive = pathname.startsWith('/markets');
+  const isTerminalActive = pathname.startsWith('/terminal');
 
   return (
     <div className="min-h-screen bg-[#050505] bg-radial-glow flex flex-col items-center overflow-x-hidden relative">
       
-      {/* Mouse-follow glow */}
+      {/* Subtle static glow — no mouse tracking */}
       <div
-        className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-300"
+        className="pointer-events-none fixed inset-0 z-0"
         style={{
-          background: `radial-gradient(600px circle at ${mousePos.x}px ${mousePos.y}px, rgba(79,255,200,0.04), transparent 40%)`,
+          background: 'radial-gradient(ellipse 80% 50% at 50% 0%, rgba(79,255,200,0.03), transparent 60%)',
         }}
       />
 
@@ -101,19 +146,49 @@ export default function LandingPage() {
               <div className="w-10 h-10 bg-[#4FFFC8] rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(79,255,200,0.3)]">
                 <TrendingUp className="w-6 h-6 text-black" strokeWidth={1.5} />
               </div>
-              <Link href="/" className="text-2xl font-black text-white tracking-tighter uppercase">Prop Market</Link>
+              <Link href="/" className="text-2xl font-black text-white tracking-tighter uppercase">Synq</Link>
             </div>
             
             <div className="hidden lg:flex items-center gap-10">
-              <Link href="/markets" className="text-slate-400 hover:text-[#4FFFC8] font-bold text-xs uppercase tracking-widest">Markets</Link>
-              <Link href="/terminal" className="text-slate-400 hover:text-[#4FFFC8] font-bold text-xs uppercase tracking-widest">Terminal</Link>
+              <Link
+                href="/markets"
+                className={`text-xs font-semibold tracking-[0.18em] ${
+                  isMarketsActive ? 'text-white' : 'text-slate-400 hover:text-[#4FFFC8]'
+                } pb-0.5 border-b ${
+                  isMarketsActive ? 'border-[#4FFFC8]/70' : 'border-transparent'
+                } transition-colors`}
+              >
+                Markets
+              </Link>
+              <Link
+                href="/terminal"
+                className={`text-xs font-semibold tracking-[0.18em] ${
+                  isTerminalActive ? 'text-white' : 'text-slate-400 hover:text-[#4FFFC8]'
+                } pb-0.5 border-b ${
+                  isTerminalActive ? 'border-[#4FFFC8]/70' : 'border-transparent'
+                } transition-colors`}
+              >
+                Terminal
+              </Link>
               {mounted && user ? (
-                <Link href="/dashboard" className="px-8 py-3 bg-[#4FFFC8] text-black font-black rounded-full text-xs uppercase tracking-widest shadow-[0_0_20px_rgba(79,255,200,0.3)]">Dashboard</Link>
-              ) : (
-                <div className="flex items-center gap-6">
-                  <Link href="/login" className="text-white hover:text-[#4FFFC8] font-bold text-xs uppercase tracking-widest">Login</Link>
-                  <Link href="/login" className="px-8 py-3 bg-[#4FFFC8] text-black font-black rounded-full text-xs uppercase tracking-widest shadow-[0_0_20px_rgba(79,255,200,0.3)]">Get Started</Link>
+                <div className="flex items-center gap-4">
+                  <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 bg-[#0f0f0f]/80 backdrop-blur-md rounded-full border border-[#1A1A1A]">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[10px] font-mono text-slate-300">
+                      {user.email}
+                    </span>
+                  </div>
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-emerald-400 font-semibold">
+                    Wallet connected
+                  </span>
                 </div>
+              ) : (
+                <Link
+                  href="/login"
+                  className="px-8 py-3 bg-[#4FFFC8] hover:bg-[#3debb8] text-black font-black rounded-full text-xs uppercase tracking-[0.22em] shadow-[0_0_20px_rgba(79,255,200,0.3)]"
+                >
+                  Connect wallet
+                </Link>
               )}
             </div>
           </div>
@@ -127,202 +202,229 @@ export default function LandingPage() {
         
         {/* --- HERO SECTION --- */}
         <section className="w-full flex flex-col items-center px-6 pt-16 pb-20 relative overflow-hidden">
-          {/* Animated Background Effects */}
+          {/* Background — single subtle gradient, no animation */}
           <div className="absolute inset-0 pointer-events-none">
-            {/* Large pulsing gradient orb - top left */}
-            <motion.div
-              className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full"
+            <div
+              className="absolute left-1/2 top-1/3 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] rounded-full"
               style={{
-                background: 'radial-gradient(circle, rgba(79,255,200,0.08) 0%, transparent 70%)',
-              }}
-              animate={{
-                scale: [1, 1.2, 1],
-                opacity: [0.3, 0.6, 0.3],
-              }}
-              transition={{
-                duration: 8,
-                repeat: Infinity,
-                ease: 'easeInOut',
+                background: 'radial-gradient(circle, rgba(79,255,200,0.06) 0%, transparent 60%)',
               }}
             />
-            
-            {/* Secondary orb - bottom right */}
-            <motion.div
-              className="absolute -bottom-40 -right-40 w-[500px] h-[500px] rounded-full"
-              style={{
-                background: 'radial-gradient(circle, rgba(123,97,255,0.06) 0%, transparent 70%)',
-              }}
-              animate={{
-                scale: [1.2, 1, 1.2],
-                opacity: [0.2, 0.5, 0.2],
-              }}
-              transition={{
-                duration: 10,
-                repeat: Infinity,
-                ease: 'easeInOut',
-                delay: 2,
-              }}
-            />
-
-            {/* Floating particles */}
-            {[...Array(30)].map((_, i) => (
-              <motion.div
-                key={i}
-                className="absolute w-1 h-1 rounded-full bg-[#4FFFC8]"
-                style={{
-                  left: `${Math.random() * 100}%`,
-                  top: `${Math.random() * 100}%`,
-                }}
-                animate={{
-                  y: [0, -30, 0],
-                  opacity: [0, 0.6, 0],
-                  scale: [0, 1, 0],
-                }}
-                transition={{
-                  duration: 3 + Math.random() * 4,
-                  repeat: Infinity,
-                  delay: Math.random() * 5,
-                  ease: 'easeInOut',
-                }}
-              />
-            ))}
-
-            {/* Animated grid lines - subtle */}
-            <div 
-              className="absolute inset-0 opacity-[0.02]"
+            <div
+              className="absolute inset-0 opacity-[0.015]"
               style={{
                 backgroundImage: `
                   linear-gradient(to right, #4FFFC8 1px, transparent 1px),
                   linear-gradient(to bottom, #4FFFC8 1px, transparent 1px)
                 `,
-                backgroundSize: '100px 100px',
+                backgroundSize: '80px 80px',
               }}
             />
-
-            {/* Diagonal light beams */}
-            <motion.div
-              className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-[#4FFFC8]/20 to-transparent"
-              style={{ transform: 'rotate(25deg)', transformOrigin: 'top' }}
-              animate={{
-                opacity: [0.1, 0.3, 0.1],
-              }}
-              transition={{
-                duration: 5,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              }}
-            />
-            <motion.div
-              className="absolute top-0 right-1/3 w-px h-full bg-gradient-to-b from-transparent via-[#7B61FF]/15 to-transparent"
-              style={{ transform: 'rotate(-20deg)', transformOrigin: 'top' }}
-              animate={{
-                opacity: [0.1, 0.25, 0.1],
-              }}
-              transition={{
-                duration: 6,
-                repeat: Infinity,
-                ease: 'easeInOut',
-                delay: 1,
-              }}
-            />
-
-            {/* Concentric circles - ripple effect */}
-            {[...Array(3)].map((_, i) => (
-              <motion.div
-                key={i}
-                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#4FFFC8]/10"
-                style={{
-                  width: 300 + i * 200,
-                  height: 300 + i * 200,
-                }}
-                animate={{
-                  scale: [1, 1.1, 1],
-                  opacity: [0.1, 0.3, 0.1],
-                }}
-                transition={{
-                  duration: 4,
-                  repeat: Infinity,
-                  delay: i * 1.3,
-                  ease: 'easeInOut',
-                }}
-              />
-            ))}
           </div>
 
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8 }}
-            className="max-w-6xl w-full flex flex-col items-center text-center relative z-10"
+            className="max-w-6xl w-full grid lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] gap-10 lg:gap-14 items-center relative z-10"
           >
-            <div className="inline-block px-4 py-1.5 rounded-full bg-[#0f0f0f]/80 border border-[#1A1A1A] text-[#4FFFC8] text-[8px] font-black tracking-[0.3em] uppercase mb-6">
-              Onchain Multi‑Venue Trading Terminal
+            {/* Left: copy + primary CTA + metrics strip */}
+            <div className="flex flex-col items-center lg:items-start text-center lg:text-left">
+              <p className="text-sm text-slate-500 mb-4">
+                RWAs · prediction markets · meme coins
+              </p>
+              
+              <h1 className="text-4xl md:text-5xl font-semibold mb-4 leading-tight tracking-tight">
+                <span className="text-slate-100">
+                  Aggregated{" "}
+                  <span className="text-gradient-cyan-indigo">
+                    RWAs, prediction markets,
+                  </span>
+                </span>
+                <br className="hidden md:block" />
+                <span className="text-slate-100">
+                  and{" "}
+                  <span className="text-gradient-cyan-indigo">
+                    meme coins
+                  </span>{" "}
+                  in one execution terminal.
+                </span>
+              </h1>
+              
+              <p className="text-base md:text-lg text-slate-400 mb-4 max-w-xl leading-relaxed">
+                Connect your wallet and trade tokenized RWAs, prediction markets and meme coins from a single screen.
+                No email logins, no CSV exports—just one onchain terminal.
+              </p>
+
+              {topMover && (
+                <p className="mb-8 text-xs text-slate-500 font-mono tabular-nums">
+                  Top move:&nbsp;
+                  <span className="text-slate-300">{topMover.name}</span>
+                  &nbsp;
+                  <span
+                    className={
+                      (topMover.change ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }
+                  >
+                    {(topMover.change ?? 0) >= 0 ? '+' : ''}
+                    {(topMover.change ?? 0).toFixed(1)}%
+                  </span>
+                  &nbsp;today
+                </p>
+              )}
+              
+              <div className="flex flex-col md:flex-row gap-3 justify-center lg:justify-start items-center w-full mb-4">
+                <Link
+                  href={mounted && user ? "/terminal" : "/login"}
+                  className="w-full md:w-auto px-10 py-4 bg-[#4FFFC8] hover:bg-[#3debb8] text-black font-black rounded-full transition-all hover:scale-[1.02] shadow-[0_0_18px_rgba(79,255,200,0.3)] text-sm uppercase tracking-[0.22em] flex items-center justify-center gap-3 border border-emerald-300/70"
+                >
+                  {mounted && user ? "Enter terminal" : "Preview terminal"}
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </div>
+
+              {/* Metrics strip */}
+              <div className="mt-3 w-full max-w-xl rounded-full border border-[#1A1A1A] bg-black/40 px-5 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500 font-semibold">
+                    Volume (top markets)
+                  </span>
+                  <span className="font-mono text-sm text-[#4FFFC8] tabular-nums">
+                    {formattedVolume}
+                  </span>
+                </div>
+                <div className="h-px sm:h-6 w-full sm:w-px bg-[#1A1A1A] sm:mx-3" />
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500 font-semibold">
+                    Markets live
+                  </span>
+                  <span className="font-mono text-sm text-slate-300 tabular-nums">
+                    {marketsLive || '—'}
+                  </span>
+                </div>
+                <div className="h-px sm:h-6 w-full sm:w-px bg-[#1A1A1A] sm:mx-3" />
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500 font-semibold">
+                    Venues
+                  </span>
+                  <span className="font-mono text-sm text-slate-300">
+                    Polymarket · Kalshi
+                  </span>
+                </div>
+              </div>
             </div>
-            
-            <h1 className="text-5xl md:text-6xl font-black text-white mb-8 leading-tight tracking-[-0.05em] uppercase">
-              Trade Stocks, Memes,<br />
-              <span className="text-gradient-cyan-indigo">Tokens & Prediction Markets</span>
-            </h1>
-            
-            <p className="text-lg md:text-xl text-slate-400 mb-12 max-w-3xl leading-relaxed font-medium">
-              Connect to Kalshi, Polymarket, and onchain venues from a single interface. Watch flows, prices, and opportunities update in real time across your entire watchlist.
-            </p>
-            
-            <div className="flex flex-col md:flex-row gap-4 justify-center items-center w-full mb-8">
-              <Link
-                href={mounted && user ? "/terminal" : "/login"}
-                className="w-full md:w-auto px-12 py-5 bg-[#4FFFC8] hover:bg-[#3debb8] text-black font-black rounded-full transition-all hover:scale-[1.02] shadow-[0_0_20px_rgba(79,255,200,0.3)] text-lg uppercase tracking-tighter flex items-center gap-3"
-              >
-                {mounted && user ? "Enter Terminal" : "Open Terminal"}
-                <ArrowRight className="w-5 h-5" />
-              </Link>
+
+            {/* Right: live orderboard panel */}
+            <div className="hidden md:block">
+              <div className="mx-auto w-full max-w-xl rounded-2xl border border-[#1A1A1A] bg-black/70 backdrop-blur-xl shadow-[0_22px_70px_rgba(0,0,0,0.7)] card-floating">
+                <div className="px-4 pt-4 pb-2 flex items-center justify-between border-b border-[#111827]">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      Live orderboard
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Wallet: connected
+                  </span>
+                </div>
+                <div className="px-4 py-2 flex items-center text-[10px] uppercase tracking-[0.18em] text-slate-500 gap-3">
+                  <span className="w-[44%]">Market</span>
+                  <span className="w-[18%] text-right">Price</span>
+                  <span className="w-[18%] text-right">Move</span>
+                  <span className="w-[20%] text-right">Venue</span>
+                </div>
+                <div className="px-3 pb-3 max-h-80 overflow-y-auto custom-scrollbar">
+                  {loading ? (
+                    <div className="space-y-1.5">
+                      {[...Array(8)].map((_, i) => (
+                        <div
+                          key={i}
+                          className="h-9 rounded-lg bg-[#050505] border border-[#111827] animate-pulse"
+                        />
+                      ))}
+                    </div>
+                  ) : orderboardMarkets.length === 0 ? (
+                    <div className="h-24 flex items-center justify-center text-xs text-slate-500">
+                      Markets will appear here as liquidity comes online.
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {orderboardMarkets.map((m, idx) => {
+                        const rawChange = m.change ?? 0;
+                        const hasChange = Math.abs(rawChange) >= 0.05;
+                        const moveLabel = hasChange
+                          ? `${rawChange >= 0 ? '+' : ''}${rawChange.toFixed(1)}%`
+                          : '—';
+                        const isPing = idx === pingIndex;
+                        return (
+                          <motion.div
+                            key={m.id}
+                            className="h-9 rounded-lg bg-[#050505] border border-[#111827] flex items-center px-3 text-[11px] overflow-hidden"
+                            animate={
+                              isPing
+                                ? {
+                                    scale: [1, 1.01, 1],
+                                    backgroundColor: [
+                                      'rgba(5,5,5,1)',
+                                      'rgba(15,23,42,1)',
+                                      'rgba(5,5,5,1)',
+                                    ],
+                                  }
+                                : { scale: 1, backgroundColor: 'rgba(5,5,5,1)' }
+                            }
+                            transition={{ duration: 0.5, ease: 'easeOut' }}
+                          >
+                            <div className="w-[44%] truncate text-slate-200 flex items-center gap-2">
+                              <span className="w-1 h-4 rounded-full bg-[#1E293B]" />
+                              <span className="truncate">{m.name}</span>
+                            </div>
+                            <div className="w-[18%] text-right font-mono text-[#4FFFC8]">
+                              ${m.price.toFixed(2)}
+                            </div>
+                            <div className="w-[18%] text-right font-mono">
+                              {hasChange ? (
+                                <motion.span
+                                  className={rawChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}
+                                  animate={
+                                    isPing
+                                      ? { scale: [1, 1.1, 1], y: [-1, 0], opacity: [0.6, 1] }
+                                      : { scale: 1, y: 0, opacity: 1 }
+                                  }
+                                  transition={{ duration: 0.4, ease: 'easeOut' }}
+                                >
+                                  {moveLabel}
+                                </motion.span>
+                              ) : (
+                                <span className="text-slate-500">{moveLabel}</span>
+                              )}
+                            </div>
+                            <div className="w-[20%] text-right">
+                              <span
+                                className={`inline-flex items-center justify-end gap-1 text-[9px] px-1.5 py-[2px] rounded-full border ${
+                                  m.provider === 'Kalshi'
+                                    ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/5'
+                                    : 'border-blue-500/40 text-blue-300 bg-blue-500/5'
+                                }`}
+                              >
+                                <span
+                                  className={`w-1 h-1 rounded-full ${
+                                    m.provider === 'Kalshi' ? 'bg-emerald-400' : 'bg-blue-400'
+                                  }`}
+                                />
+                                {m.provider}
+                              </span>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </motion.div>
 
-          {/* Floating Provider Badges */}
-          <div className="hidden md:block absolute inset-0 pointer-events-none z-0">
-            {/* Polymarket — left side */}
-            <motion.div
-              animate={{ y: [0, -10, 0] }}
-              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-              className="absolute left-[6%] lg:left-[10%] top-[55%]"
-            >
-              <div className="flex items-center gap-3 px-5 py-3 bg-[#0a0a0a]/80 backdrop-blur-xl border border-[#1A1A1A] rounded-2xl shadow-lg">
-                <div className="w-9 h-9 rounded-lg overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/polymarket-logo.svg" alt="Polymarket" className="w-full h-full object-cover" />
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-white leading-tight">Polymarket</div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                    <span className="text-[10px] text-blue-400 font-semibold">Live</span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Kalshi — right side */}
-            <motion.div
-              animate={{ y: [0, 10, 0] }}
-              transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
-              className="absolute right-[6%] lg:right-[10%] top-[60%]"
-            >
-              <div className="flex items-center gap-3 px-5 py-3 bg-[#0a0a0a]/80 backdrop-blur-xl border border-[#1A1A1A] rounded-2xl shadow-lg">
-                <div className="w-9 h-9 rounded-lg overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/kalshi-logo.svg" alt="Kalshi" className="w-full h-full object-cover" />
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-white leading-tight">Kalshi</div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-[10px] text-emerald-400 font-semibold">Live</span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
         </section>
 
         {/* --- LIVE MARKETS - Floating Cards with Live Dot --- */}
@@ -330,8 +432,31 @@ export default function LandingPage() {
           <div className="max-w-6xl w-full px-6 flex flex-col items-center">
             <div className="w-full flex flex-col items-center text-center mb-10 gap-6">
               <div className="text-center">
-                <h2 className="text-2xl font-black text-white mb-4 tracking-tighter uppercase">Real-Time Feeds</h2>
-                <p className="text-slate-400 text-xl font-medium">Synced institutional data from Polymarket & Kalshi protocols.</p>
+                <h2 className="text-xl font-bold text-white mb-3">Live markets</h2>
+                <p className="text-slate-400 text-sm">
+                  Live data from Polymarket and Kalshi. Filter by venue to mirror the terminal.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="inline-flex rounded-full border border-[#1A1A1A] bg-black/40 p-1">
+                  {(['all', 'Polymarket', 'Kalshi'] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setVenueFilter(v)}
+                      className={`px-4 py-1.5 text-[11px] rounded-full transition-all ${
+                        venueFilter === v
+                          ? 'bg-[#111827] text-[#4FFFC8] border border-[#4FFFC8]/30'
+                          : 'text-slate-400 border border-transparent hover:border-[#4FFFC8]/20'
+                      }`}
+                    >
+                      {v === 'all' ? 'All venues' : v}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500 font-mono tabular-nums">
+                  Showing {filteredMarkets.length || 0} markets
+                </p>
               </div>
               <Link href="/markets" className="px-8 py-3 bg-transparent border border-[#1A1A1A] text-white font-bold rounded-full flex items-center gap-3 hover:border-[#4FFFC8]/30 hover:bg-[#4FFFC8]/5 transition-all tracking-widest uppercase text-xs">
                 Browse Markets <ChevronRight className="w-5 h-5" />
@@ -344,13 +469,13 @@ export default function LandingPage() {
                   <div key={i} className="h-32 card-floating rounded-xl animate-pulse" />
                 ))}
               </div>
-            ) : markets.length === 0 ? (
+            ) : filteredMarkets.length === 0 ? (
               <div className="w-full py-16 text-center text-slate-500">
-                No live markets available right now. Check back in a few minutes or browse all markets.
+                No live markets available for this venue filter. Try switching venues or check back in a few minutes.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
-                {markets.slice(0, 9).map((market, idx) => (
+                {filteredMarkets.slice(0, 9).map((market, idx) => (
                   <motion.div
                     key={market.id}
                     initial={{ opacity: 0, scale: 0.95 }}
@@ -419,10 +544,9 @@ export default function LandingPage() {
         {/* --- TECHNICAL ADVANTAGES --- */}
         <section className="w-full py-20 border-t border-[#1A1A1A] flex flex-col items-center">
           <div className="max-w-6xl w-full px-6 flex flex-col items-center">
-            <div className="flex flex-col items-center text-center mb-12">
-              <h2 className="text-2xl font-black text-white mb-4 tracking-[-0.05em] uppercase">Technical Advantages</h2>
-              <div className="h-1.5 w-32 bg-[#4FFFC8] rounded-full mb-4" />
-              <p className="text-slate-400 text-lg font-medium max-w-2xl">Institutional-grade infrastructure built for speed, clarity, and cross-market intelligence.</p>
+            <div className="flex flex-col items-center text-center mb-10">
+              <h2 className="text-xl font-bold text-white mb-3">Terminal & markets</h2>
+              <p className="text-slate-400 text-sm max-w-xl">One interface for live trading and discovery across venues.</p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 w-full">
@@ -444,7 +568,7 @@ export default function LandingPage() {
                         <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/60" />
                         <span className="w-2.5 h-2.5 rounded-full bg-green-500/60" />
                       </div>
-                      <span className="text-[9px] text-slate-600 font-mono ml-2">PROP MARKET — LIVE TERMINAL</span>
+                      <span className="text-[9px] text-slate-600 font-mono ml-2">SYNQ — LIVE TERMINAL</span>
                       <span className="ml-auto text-[8px] text-emerald-500/60 font-mono flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />CONNECTED</span>
                     </div>
                     {/* Simulated feed lines */}
@@ -553,46 +677,31 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* --- THE EVALUATION PROCESS --- */}
-        <section className="w-full py-20 flex flex-col items-center">
-          <div className="max-w-6xl w-full px-6 flex flex-col items-center">
-            <div className="flex flex-col items-center text-center mb-12">
-              <h2 className="text-2xl font-black text-white mb-4 tracking-[-0.05em] uppercase">Evaluation Process</h2>
-              <div className="h-1.5 w-32 bg-[#4FFFC8] rounded-full mb-4" />
-              <p className="text-slate-400 text-lg font-medium max-w-2xl">Proven paths to institutional liquidity.</p>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-12 w-full relative">
-              <div className="hidden md:block absolute top-12 left-1/4 right-1/4 h-px bg-[#1A1A1A]" />
-              
-              {/* STEP 1 */}
-              <div className="flex flex-col items-center text-center group relative z-10">
-                <div className="w-16 h-16 flex items-center justify-center mb-6">
-                  <BarChart3 className="w-7 h-7 text-[#4FFFC8]" strokeWidth={1.5} />
+        {/* --- HOW IT WORKS --- */}
+        <section className="w-full py-16 border-t border-[#1A1A1A] flex flex-col items-center">
+          <div className="max-w-4xl w-full px-6 flex flex-col items-center">
+            <h2 className="text-xl font-bold text-white mb-8">How it works</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full text-center">
+              <div>
+                <div className="w-10 h-10 rounded-full bg-[#4FFFC8]/10 border border-[#4FFFC8]/20 flex items-center justify-center mx-auto mb-4">
+                  <Lock className="w-5 h-5 text-[#4FFFC8]" strokeWidth={1.5} />
                 </div>
-                <div className="text-[10px] text-slate-500 font-black uppercase tracking-[0.3em] mb-3">PHASE 01</div>
-                <h3 className="text-2xl font-black text-white mb-4 uppercase tracking-tighter">Evaluation</h3>
-                <p className="text-slate-500 text-lg font-medium leading-relaxed">Demonstrate your predictive accuracy in a high-liquidity sandbox while following 5% risk caps.</p>
+                <h3 className="text-sm font-semibold text-white mb-2">Connect wallet</h3>
+                <p className="text-slate-500 text-sm">Sign in with Phantom or Solflare. No account required.</p>
               </div>
-
-              {/* STEP 2 */}
-              <div className="flex flex-col items-center text-center group relative z-10">
-                <div className="w-16 h-16 flex items-center justify-center mb-6">
-                  <Shield className="w-7 h-7 text-[#4FFFC8]" strokeWidth={1.5} />
+              <div>
+                <div className="w-10 h-10 rounded-full bg-[#4FFFC8]/10 border border-[#4FFFC8]/20 flex items-center justify-center mx-auto mb-4">
+                  <Monitor className="w-5 h-5 text-[#4FFFC8]" strokeWidth={1.5} />
                 </div>
-                <div className="text-[10px] text-slate-500 font-black uppercase tracking-[0.3em] mb-3">PHASE 02</div>
-                <h3 className="text-2xl font-black text-white mb-4 uppercase tracking-tighter">Verification</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">Automated consistency auditing ensures your trading strategy is sustainable for institutional capital.</p>
+                <h3 className="text-sm font-semibold text-white mb-2">Open terminal</h3>
+                <p className="text-slate-500 text-sm">One feed for Polymarket and Kalshi with live execution.</p>
               </div>
-
-              {/* STEP 3 */}
-              <div className="flex flex-col items-center text-center group relative z-10">
-                <div className="w-16 h-16 flex items-center justify-center mb-6">
-                  <Zap className="w-7 h-7 text-[#4FFFC8]" strokeWidth={1.5} />
+              <div>
+                <div className="w-10 h-10 rounded-full bg-[#4FFFC8]/10 border border-[#4FFFC8]/20 flex items-center justify-center mx-auto mb-4">
+                  <BarChart3 className="w-5 h-5 text-[#4FFFC8]" strokeWidth={1.5} />
                 </div>
-                <div className="text-[10px] text-slate-500 font-black uppercase tracking-[0.3em] mb-3">PHASE 03</div>
-                <h3 className="text-2xl font-black text-white mb-4 uppercase tracking-tighter">Funded</h3>
-                <p className="text-slate-500 text-lg font-medium leading-relaxed">Unlock access to our master liquidity pool. Keep 80% of all monthly performance fees generated.</p>
+                <h3 className="text-sm font-semibold text-white mb-2">Trade & track</h3>
+                <p className="text-slate-500 text-sm">Filter by category, compare odds, and manage positions.</p>
               </div>
             </div>
           </div>
@@ -635,44 +744,25 @@ export default function LandingPage() {
         </section>
         )}
 
-        {/* --- PLATFORM PILLARS --- */}
-        <section className="w-full py-20 border-t border-[#1A1A1A] flex flex-col items-center">
-          <div className="max-w-6xl w-full px-6 mx-auto flex flex-col items-center">
-            <div className="flex flex-col items-center text-center mb-12">
-              <h2 className="text-2xl font-black text-white mb-4 tracking-[-0.05em] uppercase">The Prop Market Platform</h2>
-              <div className="h-1.5 w-32 bg-[#4FFFC8] rounded-full mb-4" />
-              <p className="text-slate-400 text-lg font-medium max-w-2xl">Built for the next generation of prediction market traders.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full">
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <BarChart3 className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">The Trading Terminal</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">
-                  Experience a pro-grade command center built specifically for prediction markets. Our terminal features
-                  high-density order books, real-time depth charts, and sub-second trade execution across global venues.
-                  Designed for speed and clarity, it provides the institutional tools you need to stay ahead of the curve.
-                </p>
+        {/* --- WHAT YOU GET --- */}
+        <section className="w-full py-16 border-t border-[#1A1A1A] flex flex-col items-center">
+          <div className="max-w-4xl w-full px-6 mx-auto flex flex-col items-center">
+            <h2 className="text-xl font-bold text-white mb-8">What you get</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+              <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
+                <Monitor className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
+                <h3 className="text-sm font-semibold text-white mb-2">Unified terminal</h3>
+                <p className="text-slate-500 text-sm">One live feed for Polymarket and Kalshi with execution and activity.</p>
               </div>
-
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <PieChart className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Education &amp; Trading Strategy</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">
-                  Bridging the gap between learning and earning. Our platform offers a structured educational path paired
-                  with simulated funding challenges. Master risk management, hit your profit targets, and earn funded seats
-                  without risking your own capital—the ultimate environment for professional growth.
-                </p>
+              <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
+                <Grid3x3 className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
+                <h3 className="text-sm font-semibold text-white mb-2">Markets explorer</h3>
+                <p className="text-slate-500 text-sm">Browse and filter by category with real-time prices and volume.</p>
               </div>
-
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <Activity className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Cross-Market &amp; Arbitrage</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">
-                  Capitalize on market inefficiencies with our integrated arbitrage engine. We scan Polymarket and Kalshi
-                  simultaneously to highlight live spread opportunities in real-time. Whether you&#39;re stringing together
-                  complex parlay slips or executing cross-platform hedges, our engine ensures you capture the edge every time.
-                </p>
+              <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
+                <Activity className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
+                <h3 className="text-sm font-semibold text-white mb-2">Cross-venue view</h3>
+                <p className="text-slate-500 text-sm">Compare odds and spot opportunities across both venues.</p>
               </div>
             </div>
           </div>
@@ -681,59 +771,30 @@ export default function LandingPage() {
         {/* --- INTERACTIVE GRID BACKGROUND SECTION --- */}
         <InteractiveGridSection />
 
-        {/* --- INSTITUTIONAL ADVANTAGE --- */}
-        <section className="w-full py-20 border-t border-[#1A1A1A] flex flex-col items-center">
-          <div className="max-w-6xl w-full px-6 mx-auto flex flex-col items-center">
-            <div className="flex flex-col items-center text-center mb-12">
-              <h2 className="text-2xl font-black text-white mb-4 tracking-[-0.05em] uppercase">Institutional Grade</h2>
-              <div className="h-1.5 w-32 bg-[#4FFFC8] rounded-full mb-4" />
-              <p className="text-slate-400 text-lg font-medium max-w-2xl">Enterprise-level infrastructure for serious traders.</p>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full">
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <Shield className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Risk Shield</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">Automated 5% daily loss monitoring ensures your capital exposure is managed in real-time.</p>
+        {/* --- WALLET & VENUES --- */}
+        <section className="w-full py-16 border-t border-[#1A1A1A] flex flex-col items-center">
+          <div className="max-w-4xl w-full px-6 mx-auto flex flex-col items-center">
+            <h2 className="text-xl font-bold text-white mb-8">Wallet-native, multi-venue</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+              <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
+                <Lock className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
+                <h3 className="text-sm font-semibold text-white mb-2">Connect your wallet</h3>
+                <p className="text-slate-500 text-sm">Phantom or Solflare. No account or password.</p>
               </div>
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <Globe className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Global Liquidity</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">Direct unfiltered access to the most liquid event contracts across Polymarket protocols.</p>
+              <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
+                <Globe className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
+                <h3 className="text-sm font-semibold text-white mb-2">One place, all venues</h3>
+                <p className="text-slate-500 text-sm">Polymarket and Kalshi in a single terminal.</p>
               </div>
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <CheckCircle2 className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Transparency</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">No hidden fees or complex payout windows. Your performance metrics are updated every 30 seconds.</p>
-              </div>
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <Filter className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Event Filtering</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">Sort through thousands of markets by category: Politics, Economics, Entertainment, and News.</p>
-              </div>
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <Lock className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Secure Escrow</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">Performance payouts are held in auditable secure accounts until the monthly clearing cycle completes.</p>
-              </div>
-              <div className="p-8 bg-[#0f0f0f]/80 border border-[#1A1A1A] rounded-xl hover:border-[#4FFFC8]/20 transition-colors text-center">
-                <Zap className="w-8 h-8 text-[#4FFFC8] mx-auto mb-6" strokeWidth={1.5} />
-                <h3 className="text-xl font-black text-white mb-4 uppercase tracking-tighter">Pro Terminal</h3>
-                <p className="text-slate-500 text-sm font-medium leading-relaxed">Advanced institutional dashboard with deep position tracking, trade history, and equity analytics.</p>
+              <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
+                <Shield className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
+                <h3 className="text-sm font-semibold text-white mb-2">You hold the keys</h3>
+                <p className="text-slate-500 text-sm">We don’t custody funds. Your wallet, your control.</p>
               </div>
             </div>
           </div>
         </section>
 
-        {/* --- BOTTOM FIXED CTA: ACCESS FUNDING --- */}
-        <div className="fixed bottom-4 left-0 right-0 z-40 flex justify-center pointer-events-none px-4">
-          <Link
-            href="/challenges"
-            className="pointer-events-auto inline-flex items-center gap-3 px-10 py-4 bg-[#4FFFC8] text-black font-black rounded-full shadow-[0_0_24px_rgba(79,255,200,0.4)] text-xs md:text-sm uppercase tracking-[0.2em]"
-          >
-            Access Funding <ArrowRight className="w-4 h-4" strokeWidth={1.5} />
-          </Link>
-        </div>
       </main>
 
       {/* --- FOOTER --- */}
@@ -742,20 +803,20 @@ export default function LandingPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-12 mb-16 w-full text-center md:text-left">
             <div>
               <div className="flex items-center gap-3 mb-6 justify-center md:justify-start">
-                <div className="text-xl font-black text-white tracking-tighter uppercase">Prop Market</div>
+                <div className="text-xl font-black text-white tracking-tighter uppercase">Synq</div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#4FFFC8]" />
                 </div>
               </div>
-              <p className="text-xs text-slate-500 leading-relaxed max-w-xs mx-auto md:mx-0">Empowering the predictive elite with institutional liquidity and world-class analytics.</p>
+              <p className="text-xs text-slate-500 leading-relaxed max-w-xs mx-auto md:mx-0">One terminal for Polymarket and Kalshi. Connect your wallet and trade.</p>
             </div>
             
             <div>
               <div className="font-black text-white mb-6 text-[11px] uppercase tracking-[0.3em]">Protocol</div>
               <ul className="space-y-4 text-xs text-slate-500">
-                <li><Link href="/challenges" className="hover:text-[#4FFFC8] transition-colors">Evaluation Tiers</Link></li>
                 <li><Link href="/markets" className="hover:text-[#4FFFC8] transition-colors">Live Markets</Link></li>
-                <li><Link href="/dashboard" className="hover:text-[#4FFFC8] transition-colors">Trader Dashboard</Link></li>
+                <li><Link href="/terminal" className="hover:text-[#4FFFC8] transition-colors">Terminal</Link></li>
+                <li><Link href="/leaderboard" className="hover:text-[#4FFFC8] transition-colors">Leaderboard</Link></li>
               </ul>
             </div>
             
@@ -780,7 +841,7 @@ export default function LandingPage() {
           
           <div className="border-t border-[#1A1A1A] pt-10 w-full text-center">
             <p className="text-[11px] text-slate-600 font-bold uppercase tracking-[0.3em]">
-              © {new Date().getFullYear()} Prop Market Ltd. All rights reserved.
+              © {new Date().getFullYear()} Synq. All rights reserved.
             </p>
           </div>
         </div>
@@ -791,179 +852,39 @@ export default function LandingPage() {
 
 // ─── INTERACTIVE GRID SECTION COMPONENT ───
 function InteractiveGridSection() {
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const [scrollProgress, setScrollProgress] = useState(0);
-  const [localMouse, setLocalMouse] = useState({ x: 0, y: 0 });
-  const [isHovering, setIsHovering] = useState(false);
-
-  // Track scroll position relative to this section
-  useEffect(() => {
-    const handleScroll = () => {
-      if (!sectionRef.current) return;
-      
-      const rect = sectionRef.current.getBoundingClientRect();
-      const windowHeight = window.innerHeight;
-      const sectionHeight = rect.height;
-      
-      // Calculate how much of the section is in view (0 to 1)
-      const topVisible = Math.max(0, windowHeight - rect.top);
-      const bottomVisible = Math.max(0, rect.bottom);
-      const visibleHeight = Math.min(topVisible, bottomVisible, sectionHeight);
-      
-      // Progress is strongest when section is centered in viewport
-      const centerOffset = Math.abs((rect.top + sectionHeight / 2) - windowHeight / 2);
-      const maxOffset = windowHeight / 2 + sectionHeight / 2;
-      const progress = 1 - Math.min(centerOffset / maxOffset, 1);
-      
-      setScrollProgress(progress);
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll(); // Initial check
-    
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  // Track mouse position within the section
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!sectionRef.current) return;
-    const rect = sectionRef.current.getBoundingClientRect();
-    setLocalMouse({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    });
-  };
-
-  // Calculate dynamic opacity based on scroll and hover
-  const baseOpacity = 0.03 + (scrollProgress * 0.12); // 0.03 to 0.15
-  const hoverBoost = isHovering ? 0.08 : 0;
-  const gridOpacity = baseOpacity + hoverBoost;
-
   return (
-    <section
-      ref={sectionRef}
-      onMouseMove={handleMouseMove}
-      onMouseEnter={() => setIsHovering(true)}
-      onMouseLeave={() => setIsHovering(false)}
-      className="w-full py-32 border-t border-[#1A1A1A] relative overflow-hidden"
-    >
-      {/* Animated Grid Background */}
-      <div className="absolute inset-0 pointer-events-none">
-        {/* Base grid - always visible but dim */}
-        <div
-          className="absolute inset-0 transition-opacity duration-500"
-          style={{
-            opacity: gridOpacity,
-            backgroundImage: `
-              linear-gradient(to right, #4FFFC8 1px, transparent 1px),
-              linear-gradient(to bottom, #4FFFC8 1px, transparent 1px)
-            `,
-            backgroundSize: '60px 60px',
-          }}
-        />
-        
-        {/* Mouse-following spotlight effect */}
-        {isHovering && (
-          <motion.div
-            className="absolute pointer-events-none"
-            animate={{
-              x: localMouse.x - 200,
-              y: localMouse.y - 200,
-            }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            style={{
-              width: 400,
-              height: 400,
-              background: 'radial-gradient(circle, rgba(79,255,200,0.15) 0%, transparent 70%)',
-            }}
-          />
-        )}
-        
-        {/* Pulsing grid nodes at intersections */}
-        <div className="absolute inset-0" style={{ opacity: gridOpacity * 1.5 }}>
-          {[...Array(20)].map((_, i) => (
-            <motion.div
-              key={i}
-              className="absolute w-1 h-1 rounded-full bg-[#4FFFC8]"
-              style={{
-                left: `${(i % 5) * 20 + 10}%`,
-                top: `${Math.floor(i / 5) * 25 + 12}%`,
-              }}
-              animate={{
-                opacity: [0.2, 0.8, 0.2],
-                scale: [1, 1.5, 1],
-              }}
-              transition={{
-                duration: 2 + (i % 3),
-                repeat: Infinity,
-                delay: i * 0.2,
-              }}
-            />
+    <section className="w-full py-20 border-t border-[#1A1A1A] relative overflow-hidden">
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.03]"
+        style={{
+          backgroundImage: `
+            linear-gradient(to right, #4FFFC8 1px, transparent 1px),
+            linear-gradient(to bottom, #4FFFC8 1px, transparent 1px)
+          `,
+          backgroundSize: '64px 64px',
+        }}
+      />
+      <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
+        <h2 className="text-xl font-bold text-white mb-6">Polymarket and Kalshi in one place</h2>
+        <p className="text-slate-500 text-sm max-w-lg mx-auto mb-10">
+          Connect your wallet and trade from a single terminal. Live feed, real-time prices, and execution across both venues.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: 'Venues', value: 'Polymarket · Kalshi' },
+            { label: 'Auth', value: 'Wallet only' },
+            { label: 'Feed', value: 'Live execution' },
+            { label: 'Custody', value: 'Self-custody' },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="p-4 rounded-lg bg-[#0a0a0a] border border-[#1A1A1A] text-center"
+            >
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">{item.label}</div>
+              <div className="text-sm font-medium text-white">{item.value}</div>
+            </div>
           ))}
         </div>
-        
-        {/* Horizontal scan line */}
-        <motion.div
-          className="absolute left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#4FFFC8] to-transparent"
-          animate={{
-            top: ['0%', '100%', '0%'],
-            opacity: [0, 0.3, 0],
-          }}
-          transition={{
-            duration: 8,
-            repeat: Infinity,
-            ease: 'linear',
-          }}
-        />
-      </div>
-
-      {/* Content */}
-      <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-        >
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#4FFFC8]/5 border border-[#4FFFC8]/20 mb-6">
-            <Grid3x3 className="w-4 h-4 text-[#4FFFC8]" />
-            <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[#4FFFC8]">Live Infrastructure</span>
-          </div>
-          
-          <h2 className="text-3xl md:text-4xl font-black text-white mb-6 tracking-tight uppercase">
-            The Technology <span className="text-[#4FFFC8]">Backbone</span>
-          </h2>
-          
-          <p className="text-slate-400 text-lg max-w-2xl mx-auto mb-12 leading-relaxed">
-            Every trade flows through our distributed grid. Hover to illuminate the network. 
-            Scroll to see the infrastructure pulse with live market data.
-          </p>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {[
-              { label: 'Latency', value: '<50ms', desc: 'Round-trip' },
-              { label: 'Uptime', value: '99.99%', desc: 'SLA Guaranteed' },
-              { label: 'Markets', value: '5,000+', desc: 'Live Contracts' },
-              { label: 'Throughput', value: '10K+', desc: 'Trades/Second' },
-            ].map((stat, i) => (
-              <motion.div
-                key={stat.label}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.1 }}
-                className="p-6 rounded-xl bg-[#0a0a0a]/60 border border-[#1A1A1A] backdrop-blur-sm hover:border-[#4FFFC8]/20 transition-colors"
-              >
-                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-2">
-                  {stat.label}
-                </div>
-                <div className="text-2xl font-black text-white mb-1">{stat.value}</div>
-                <div className="text-[10px] text-slate-600 uppercase tracking-wider">{stat.desc}</div>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
       </div>
     </section>
   );

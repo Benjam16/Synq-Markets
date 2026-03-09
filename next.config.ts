@@ -20,7 +20,7 @@ const nextConfig: NextConfig = {
   },
 
   experimental: {
-    optimizePackageImports: ['lucide-react', 'recharts', 'framer-motion', '@supabase/supabase-js'],
+    optimizePackageImports: ['lucide-react', 'recharts', 'framer-motion'],
   },
 
   async headers() {

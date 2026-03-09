@@ -29,46 +29,33 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       // Prefetch heavy page bundles in background
       router.prefetch('/markets');
       router.prefetch('/terminal');
-      router.prefetch('/dashboard');
     }, 1500);
     return () => clearTimeout(prefetchTimer);
   }, [router]);
 
-  // Check admin status
+  // Check admin status by wallet address
   useEffect(() => {
-    if (user) {
-      // Include email in query for fallback check (case-insensitive)
-      const email = user.email || '';
-      fetch(`/api/admin/check?email=${encodeURIComponent(email)}`)
+    if (user?.address) {
+      fetch(`/api/admin/check?wallet=${encodeURIComponent(user.address)}`)
         .then((res) => res.json())
         .then((data) => {
-          console.log('[Layout] Admin check result:', data);
           const isAdminUser = data.isAdmin === true;
           setIsAdmin(isAdminUser);
-          
-          // If admin check passes, log it for debugging
-          if (isAdminUser) {
-            console.log('[Layout] ✅ Admin access granted:', data);
-          }
         })
-        .catch((error) => {
-          console.error('[Layout] Admin check error:', error);
-          setIsAdmin(false);
-        });
+        .catch(() => setIsAdmin(false));
     } else {
       setIsAdmin(false);
     }
   }, [user]);
 
-  // Primary navigation (Center) - Core trading links
-  const primaryNavItems = [
+  // Nav item type: icon must accept SVG props so we can pass className/strokeWidth
+  type NavItem = { href: string; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>>; isAdmin?: boolean };
+  const primaryNavItems: NavItem[] = [
     { href: "/markets", label: "Markets", icon: BarChart3 },
     { href: "/terminal", label: "Terminal", icon: Monitor },
     { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
   ];
-
-  // Secondary navigation (Right) - Management links
-  const secondaryNavItems: { href: string; label: string; icon: React.ComponentType }[] = [];
+  const secondaryNavItems: NavItem[] = [];
 
   // All nav items for mobile menu
   const allNavItems = [
@@ -107,7 +94,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <div className="w-9 h-9 bg-[#4FFFC8] rounded-full flex items-center justify-center group-hover:scale-105 transition-transform shadow-[0_0_20px_rgba(79,255,200,0.3)]">
                   <TrendingUp className="w-5 h-5 text-black" strokeWidth={1.5} />
                 </div>
-                <div className="text-xl font-bold text-white tracking-tight">Prop Market</div>
+                <div className="text-xl font-bold text-white tracking-tight">Synq</div>
               </Link>
             </div>
 
@@ -193,19 +180,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   {/* Notification Center */}
                   <NotificationCenter />
                   
-                  <Link
-                    href="/portal"
-                    className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#0f0f0f]/80 backdrop-blur-md rounded-full border border-[#1A1A1A] hover:border-[#4FFFC8]/30 hover:bg-[#0f0f0f] transition-all cursor-pointer group"
-                  >
-                    <div className="w-6 h-6 bg-[#4FFFC8]/20 rounded-full flex items-center justify-center border border-[#4FFFC8]/30 group-hover:bg-[#4FFFC8]/30 transition-colors">
+                  <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#0f0f0f]/80 backdrop-blur-md rounded-full border border-[#1A1A1A]">
+                    <div className="w-6 h-6 bg-[#4FFFC8]/20 rounded-full flex items-center justify-center border border-[#4FFFC8]/30">
                       <User className="w-3 h-3 text-[#4FFFC8]" strokeWidth={1.5} />
                     </div>
-                    <div className="text-xs text-slate-400 group-hover:text-white max-w-[120px] truncate transition-colors">{user.email}</div>
-                  </Link>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase tracking-[0.16em] text-emerald-400">
+                        Wallet connected
+                      </span>
+                      <span className="text-xs text-slate-300 max-w-[140px] truncate font-mono">
+                        {user.email}
+                      </span>
+                    </div>
+                  </div>
                   <button
                     onClick={handleSignOut}
                     className="p-2 text-slate-500 hover:text-white rounded-lg transition-colors"
-                    title="Sign Out"
+                    title="Disconnect wallet"
                   >
                     <LogOut className="w-4 h-4" strokeWidth={1.5} />
                   </button>
@@ -215,7 +206,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   href="/login"
                   className="px-6 py-2.5 bg-[#4FFFC8] hover:bg-[#3debb8] text-black font-bold rounded-full transition-all text-sm shadow-[0_0_20px_rgba(79,255,200,0.3)]"
                 >
-                  Sign In
+                  Connect wallet
                 </Link>
               )}
             </div>
@@ -234,7 +225,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="w-9 h-9 bg-[#4FFFC8] rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(79,255,200,0.3)]">
             <TrendingUp className="w-5 h-5 text-black" strokeWidth={1.5} />
           </div>
-          <div className="text-xl font-semibold text-white tracking-tight">Prop Market</div>
+          <div className="text-xl font-semibold text-white tracking-tight">Synq</div>
         </Link>
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -278,8 +269,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   onClick={() => setMobileMenuOpen(false)}
                   className="block p-4 bg-[#0f0f0f]/80 backdrop-blur-md rounded-2xl mb-4 border border-[#1A1A1A] hover:border-[#4FFFC8]/30 hover:bg-[#0f0f0f] transition-all"
                 >
-                  <div className="text-xs text-slate-500 mb-1">Signed in as</div>
-                  <div className="text-sm font-medium text-white truncate">{user.email}</div>
+                  <div className="text-xs text-slate-500 mb-1">Connected wallet</div>
+                  <div className="text-sm font-medium text-white truncate font-mono">{user.email}</div>
                   <div className="text-xs text-[#4FFFC8] mt-1">Tap to manage account →</div>
                 </Link>
                 <button

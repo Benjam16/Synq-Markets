@@ -1,19 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getClient } from "@/lib/db";
+import { getClient, query } from "@/lib/db";
 import { getMarketPriceFast } from "@/lib/fast-price-lookup";
+
+async function resolveUserId(body: { userId?: unknown; wallet?: string }): Promise<number | null> {
+  if (body.userId != null && !Number.isNaN(Number(body.userId))) return Number(body.userId);
+  const wallet = body.wallet;
+  if (!wallet || !process.env.DATABASE_URL) return null;
+  try {
+    const res = await query<{ id: number }>(`SELECT id FROM users WHERE wallet_address = $1 LIMIT 1`, [wallet]);
+    return res.rows.length > 0 ? res.rows[0].id : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const userId = Number(body.userId);
+  const userId = await resolveUserId(body);
   const marketId = String(body.marketId || "");
   const provider = String(body.provider || "").toLowerCase();
   const side = String(body.side || body.outcome || "yes").toLowerCase();
   const outcome = String(body.outcome || body.side || "yes");
   const quantity = Number(body.quantity);
 
-  if (!userId || !marketId || !provider || Number.isNaN(quantity)) {
+  if (userId == null || !marketId || !provider || Number.isNaN(quantity)) {
     return NextResponse.json(
-      { error: "userId, marketId, provider, quantity required" },
+      { error: "wallet (or userId), marketId, provider, quantity required" },
       { status: 400 },
     );
   }
@@ -215,13 +227,6 @@ export async function POST(req: NextRequest) {
     );
 
     await client.query("COMMIT");
-
-    // Run risk check after trade (async, don't wait)
-    fetch(`${req.nextUrl.origin}/api/risk-check`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId }),
-    }).catch(() => {}); // Silently fail - risk check runs periodically anyway
 
     return NextResponse.json({
       success: true,

@@ -269,7 +269,7 @@ export default function TerminalPage() {
 
   const tradeListRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const userIdCacheRef = useRef<number | null>(null);
+  const walletCacheRef = useRef<string | null>(null);
 
   // Keep pause ref in sync for use inside polling closure
   feedPausedRef.current = feedPaused;
@@ -339,40 +339,22 @@ export default function TerminalPage() {
     }
   }, [soundEnabled]);
 
-  // ── Get or create userId (cached) ──
-  const getUserId = useCallback(async (): Promise<number | null> => {
-    if (userIdCacheRef.current) return userIdCacheRef.current;
-    if (!user?.email) return null;
-
+  // ── Wallet for trades (ensure user exists in DB if applicable) ──
+  const getWallet = useCallback(async (): Promise<string | null> => {
+    if (walletCacheRef.current) return walletCacheRef.current;
+    const wallet = user?.address ?? null;
+    if (!wallet) return null;
+    walletCacheRef.current = wallet;
     try {
-      const res = await fetch(`/api/user?email=${encodeURIComponent(user.email)}`);
-      if (res.ok) {
-        const { user: dbUser } = await res.json();
-        if (dbUser?.id) {
-          userIdCacheRef.current = dbUser.id;
-          return dbUser.id;
-        }
-      }
-      // Create user if not found
-      const createRes = await fetch('/api/user', {
+      await fetch('/api/user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          supabaseUserId: user.id,
-          email: user.email,
-          fullName: user.user_metadata?.full_name || user.email.split('@')[0],
-        }),
+        body: JSON.stringify({ wallet }),
       });
-      if (createRes.ok) {
-        const data = await createRes.json();
-        const id = data.userId ?? data.user?.id ?? null;
-        if (id) userIdCacheRef.current = id;
-        return id;
-      }
-    } catch (err) {
-      console.warn('[Terminal] getUserId error:', err);
+    } catch {
+      // non-blocking
     }
-    return null;
+    return wallet;
   }, [user]);
 
   // ── Copy Trade to Clipboard ──
@@ -442,9 +424,9 @@ export default function TerminalPage() {
     setInstantTradeProcessing(tradeId);
 
     try {
-      const userId = await getUserId();
-      if (!userId) {
-        toast.error('Could not resolve account — please refresh');
+      const wallet = await getWallet();
+      if (!wallet) {
+        toast.error('Wallet not connected — please connect your wallet');
         setInstantTradeProcessing(null);
         return;
       }
@@ -454,7 +436,6 @@ export default function TerminalPage() {
 
       const quantity = quantityOverride && quantityOverride > 0 ? quantityOverride : instantTradeShares;
 
-      // Build external URL for dashboard links
       const providerLower = (market.provider || 'polymarket').toLowerCase();
       let extUrl = '';
       if (providerLower === 'kalshi') {
@@ -464,7 +445,6 @@ export default function TerminalPage() {
           return seriesPart.length > 2 ? `https://kalshi.com/markets/${seriesPart}` : 'https://kalshi.com/markets';
         })();
       } else {
-        // Polymarket: only use slug-based URLs (condition IDs cause 404)
         if (market.polymarketUrl) {
           extUrl = market.polymarketUrl;
         } else if (market.slug && !market.slug.startsWith('0x') && market.slug.length > 5) {
@@ -480,7 +460,7 @@ export default function TerminalPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId,
+          wallet,
           marketId: market.id || market.conditionId,
           provider: providerLower,
           side,
@@ -517,7 +497,7 @@ export default function TerminalPage() {
               </span>
               <span style={{ fontSize: '12px', opacity: 0.8 }}>{trade.marketName}</span>
               <button
-                onClick={() => { toast.dismiss(t.id); router.push('/dashboard'); }}
+                onClick={() => { toast.dismiss(t.id); router.push('/terminal'); }}
                 style={{
                   marginTop: '4px',
                   padding: '6px 12px',
@@ -530,7 +510,7 @@ export default function TerminalPage() {
                   fontSize: '12px',
                 }}
               >
-                Open in Dashboard →
+                View in Terminal →
               </button>
             </div>
           ),
@@ -556,7 +536,7 @@ export default function TerminalPage() {
     } finally {
       setInstantTradeProcessing(null);
     }
-  }, [user, getUserId, instantTradeShares, buildMarketFromTrade, playClick]);
+  }, [user, getWallet, instantTradeShares, buildMarketFromTrade, playClick]);
 
   // ── Open Trade Panel (expand button — full trade UI) ──
   // Fetches the REAL market data from /api/markets so the panel shows full
@@ -1063,7 +1043,7 @@ export default function TerminalPage() {
                   <ArrowRight className="w-4 h-4" />
                 </Link>
                 <p className="text-[11px] text-slate-500">
-                  Visit this page from a laptop or desktop to unlock the full Prop Market Terminal.
+                  Visit this page from a laptop or desktop to unlock the full Synq Terminal.
                 </p>
               </div>
             </div>
@@ -1192,7 +1172,7 @@ export default function TerminalPage() {
               Live
             </span>
             <span className="text-slate-400">
-              Powered by <span className="text-white font-semibold">Prop Market Terminal</span> — real-time prediction market analytics
+              Powered by <span className="text-white font-semibold">Synq Terminal</span> — real-time prediction market analytics
             </span>
           </div>
           <div className="flex items-center gap-3">

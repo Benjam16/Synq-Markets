@@ -3,25 +3,19 @@ import { query } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, email, subject, message } = await req.json();
+    const { userId, wallet, email, subject, message } = await req.json();
+    const identity = wallet || userId;
 
-    if (!userId || !email || !subject || !message) {
+    if (!identity || !subject || !message) {
       return NextResponse.json(
-        { error: "All fields are required" },
+        { error: "Wallet/identity, subject, and message are required" },
         { status: 400 }
       );
     }
 
-    // Store support request in database (you can create a support_tickets table)
-    // For now, we'll just log it and return success
-    // In production, you'd want to:
-    // 1. Store in a support_tickets table
-    // 2. Send email notification to support team
-    // 3. Send confirmation email to user
-
     console.log("[Support Request]", {
-      userId,
-      email,
+      wallet: identity,
+      email: email || null,
       subject,
       message,
       timestamp: new Date().toISOString(),

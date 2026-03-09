@@ -6,32 +6,50 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 10; // Cache for 10 seconds
 
 /**
- * Optimized endpoint for home page - fetches only top 50 trending markets
- * Returns 6 markets sorted by volume (highest first)
- * This is much faster than fetching all 3500+ markets
+ * Optimized endpoint for home page.
  * 
- * Strategy: 
- * 1. Fetch only first 50 markets (stops pagination early)
- * 2. Sort by volume descending (trending = highest volume)
- * 3. Return top 6
+ * We fetch only the first 80 markets from the upstream sources and then:
+ * - sort by volume descending (trending = highest volume)
+ * - interleave Polymarket and Kalshi so the homepage always shows a mix of venues
  */
 export async function GET(req: NextRequest) {
   try {
     const limitParam = req.nextUrl.searchParams.get("limit");
     const count = limitParam ? parseInt(limitParam, 10) : 6; // Default to 6 for home page
     
-    console.log(`[Trending Markets API] Fetching top ${count} trending markets (from first 50)...`);
+    console.log(`[Trending Markets API] Fetching top ${count} trending markets (from first 80)...`);
     const startTime = Date.now();
     
-    // Fetch only 50 markets - this is much faster since it stops after first batch
-    // The limit parameter tells fetchAllMarkets to stop early
-    const allMarkets = await fetchAllMarkets(50);
+    // Fetch only 80 markets - this is much faster than full pagination but
+    // gives us enough depth to include both Polymarket and Kalshi.
+    const allMarkets = await fetchAllMarkets(80);
     
     // Sort by volume descending (trending = highest volume first)
     const sortedMarkets = allMarkets.sort((a: any, b: any) => (b.volume || 0) - (a.volume || 0));
-    
-    // Return only the requested count (default 6)
-    const trendingMarkets = sortedMarkets.slice(0, count);
+
+    // Ensure a mix of providers on the homepage if possible.
+    const poly = sortedMarkets.filter((m: any) => m.provider === "Polymarket");
+    const kalshi = sortedMarkets.filter((m: any) => m.provider === "Kalshi");
+
+    const mixed: any[] = [];
+    let i = 0;
+    while (mixed.length < count && (poly[i] || kalshi[i])) {
+      if (poly[i]) mixed.push(poly[i]);
+      if (mixed.length >= count) break;
+      if (kalshi[i]) mixed.push(kalshi[i]);
+      i += 1;
+    }
+
+    // If there still aren't enough, top up from the remaining sorted list.
+    if (mixed.length < count) {
+      const existingIds = new Set(mixed.map((m) => m.id));
+      for (const m of sortedMarkets) {
+        if (mixed.length >= count) break;
+        if (!existingIds.has(m.id)) mixed.push(m);
+      }
+    }
+
+    const trendingMarkets = mixed.slice(0, count);
     
     const fetchTime = Date.now() - startTime;
     console.log(`[Trending Markets API] Fetched ${trendingMarkets.length} trending markets from ${allMarkets.length} total in ${fetchTime}ms`);

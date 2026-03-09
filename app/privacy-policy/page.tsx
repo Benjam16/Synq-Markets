@@ -49,7 +49,7 @@ export default function PrivacyPolicyPage() {
             </div>
             <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-8">
               <p className="text-slate-300 leading-relaxed mb-4">
-                PROP MARKET LTD. ("we", "us", "our") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our Platform.
+                Synq ("we", "us", "our") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our Platform.
               </p>
               <p className="text-slate-300 leading-relaxed">
                 By using the Platform, you consent to the data practices described in this policy. If you do not agree with this policy, you must not use the Platform.
