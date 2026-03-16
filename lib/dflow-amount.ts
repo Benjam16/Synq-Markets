@@ -27,7 +27,7 @@ export function parseUiAmountToScaledInt(
   // Remove leading zeros but keep at least one digit.
   const normalized = combined.replace(/^0+(?=\d)/, '');
   const out = BigInt(normalized || '0');
-  if (out <= 0n) throw new Error('uiAmount must be > 0');
+  if (out <= BigInt(0)) throw new Error('uiAmount must be > 0');
   return out;
 }
 
