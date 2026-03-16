@@ -1,5 +1,5 @@
 import { Connection, PublicKey, clusterApiUrl } from '@solana/web3.js';
-import { Metadata } from '@metaplex-foundation/mpl-token-metadata';
+import * as TokenMetadata from '@metaplex-foundation/mpl-token-metadata';
 
 const SOLANA_RPC_URL =
   process.env.SOLANA_RPC_URL ||
@@ -52,7 +52,7 @@ export async function getMintMetadata(mint: string): Promise<MintMetadata> {
   let image: string | null = null;
 
   try {
-    const md = await Metadata.fromAccountAddress(conn as any, pda);
+    const md = await (TokenMetadata as any).Metadata.fromAccountAddress(conn as any, pda);
     name = md?.data?.name ? String(md.data.name).replace(/\0/g, '').trim() : null;
     symbol = md?.data?.symbol ? String(md.data.symbol).replace(/\0/g, '').trim() : null;
     uri = md?.data?.uri ? String(md.data.uri).replace(/\0/g, '').trim() : null;
