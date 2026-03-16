@@ -18,12 +18,14 @@ export async function GET() {
     const withMint = list.filter((t) => t.mint);
     const mints = withMint.map((t) => t.mint);
 
-    const [priceData, tokensV2Data] = await Promise.all([
+    const [priceData, tokensV2Raw] = await Promise.all([
       fetchPriceV2(mints, apiKey),
       apiKey
         ? fetchTokensV2(mints, apiKey)
         : Promise.resolve({}),
     ]);
+
+    const tokensV2Data = tokensV2Raw as Record<string, any>;
 
     const stocks = withMint.map((t) =>
       enrichStock(t, priceData[t.mint], tokensV2Data[t.mint])
