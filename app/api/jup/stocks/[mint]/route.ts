@@ -10,13 +10,10 @@ import {
  * GET /api/jup/stocks/[mint]
  * Returns full detail for one RWA stock (Jupiter-style stats when JUPITER_API_KEY is set).
  */
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { mint: string } }
-) {
+export async function GET(_req: NextRequest, context: any) {
   try {
     const apiKey = process.env.JUPITER_API_KEY || process.env.JUPITER_API_KEY;
-    const { mint } = params;
+    const mint = context?.params?.mint as string | undefined;
     if (!mint) {
       return NextResponse.json({ error: 'mint required' }, { status: 400 });
     }
