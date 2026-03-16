@@ -480,7 +480,7 @@ export interface TerminalSnapshot {
 
 const WHALE_THRESHOLD = 2000;
 const ARB_THRESHOLD = 0.03;
-const TRADE_CACHE_MAX = 500;
+const TRADE_CACHE_MAX = 800;
 const WHALE_CACHE_MAX = 50;
 const MARKET_TICK_MAX = 200;
 const CACHE_TTL = 3000;
@@ -493,7 +493,7 @@ const MAX_CRYPTO_PCT = 0.60;
 // Provider balance: each source gets 40–60% of feed so one doesn't dominate
 const MIN_PROVIDER_PCT = 0.40;
 const MAX_PROVIDER_PCT = 0.50; // 50% each so feed stays 50/50 when both have data (was 0.60, let Kalshi push Poly out)
-const FEED_SIZE = 300;
+const FEED_SIZE = 600;
 
 // ============================================================================
 // IN-MEMORY CACHE
@@ -1298,7 +1298,7 @@ export async function getTerminalSnapshot(): Promise<TerminalSnapshot> {
       fetchMarketTicks(),
     ]);
 
-    const FEED_WINDOW_MS = 30 * 60 * 1000; // 30 min — keep Polymarket (API delay) and recent Kalshi
+    const FEED_WINDOW_MS = 60 * 60 * 1000; // 60 min — keep last 1h of trades
     const nowTs = Date.now();
 
     // Deduplicate by trade ID and drop settled/determined Kalshi markets

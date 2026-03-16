@@ -18,6 +18,8 @@ export type Market = {
   id: string;
   conditionId: string; 
   provider: "Polymarket" | "Kalshi";
+  /** Jupiter Prediction API compatible market identifier (slug/event_ticker). */
+  jupMarketId?: string;
   name: string;
   price: number; 
   yesPrice: number;

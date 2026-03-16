@@ -1,5 +1,6 @@
 {
   "name": "prop-market",
+  "coingeckoId": "",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,9 +10,13 @@
     "lint": "eslint",
     "seed": "node scripts/seed.js",
     "make-admin": "node scripts/make-admin.js",
+    "sync-rwa-stocks": "node scripts/sync-jupiter-rwa-stocks.js",
+    "sync-dflow-stocks": "node scripts/sync-dflow-stocks.js",
+    "build-dflow-stocks": "node scripts/build-dflow-stocks-from-file.js",
     "test-db": "node scripts/test-db-connection.js"
   },
   "dependencies": {
+    "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
     "@sentry/nextjs": "^10.34.0",
     "@solana/wallet-adapter-react": "^0.15.39",
     "@solana/wallet-adapter-react-ui": "^0.9.39",

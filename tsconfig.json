@@ -16,7 +16,8 @@
     "tsBuildInfoFile": ".next/cache/.tsbuildinfo",
     "plugins": [
       {
-        "name": "next"
+        "name": "next",
+    "coingeckoId": ""
       }
     ],
     "paths": {

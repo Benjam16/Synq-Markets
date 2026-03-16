@@ -910,7 +910,7 @@ export default function MarketsPage() {
               <div className="relative max-w-[600px] w-full mx-auto px-4 md:px-0">
                 <input
                   type="text"
-                  placeholder="Search markets or type a command..."
+                  placeholder="Search predictions or type a command..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full h-[42px] px-5 pr-16 bg-white/[0.03] backdrop-blur-xl rounded-xl text-sm text-white placeholder:text-slate-500 placeholder:font-medium focus:outline-none focus:border focus:border-white/10 focus:shadow-[inset_0_0_20px_rgba(255,255,255,0.02)] transition-all"
@@ -1041,14 +1041,14 @@ export default function MarketsPage() {
           <div className="flex items-center gap-3 mb-5 px-4 py-3 rounded-xl bg-amber-500/5 border border-amber-500/20">
             <Timer className="w-4 h-4 text-amber-400 flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <span className="text-amber-400 text-xs font-bold uppercase tracking-widest">Fast-Settling Crypto Markets</span>
+              <span className="text-amber-400 text-xs font-bold uppercase tracking-widest">Fast-Settling Crypto Predictions</span>
               <p className="text-slate-400 text-[11px] mt-0.5">
-                Crypto markets resolving within the next hour from Polymarket &amp; Kalshi. Prices and timers update every 15 seconds.
+                Crypto predictions resolving within the next hour from Polymarket &amp; Kalshi. Prices and timers update every 15 seconds.
               </p>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-amber-400 text-[10px] font-bold">{combinedFastMarkets.length} markets</span>
+              <span className="text-amber-400 text-[10px] font-bold">{combinedFastMarkets.length} predictions</span>
             </div>
           </div>
         )}
@@ -1058,7 +1058,7 @@ export default function MarketsPage() {
             <div className="flex flex-col items-center gap-4">
               <div className={`w-12 h-12 border-4 border-t-transparent rounded-full animate-spin ${selectedCategory === 'Fast' ? 'border-amber-400' : 'border-[#4FFFC8]'}`} />
               <span className="text-slate-400 text-sm">
-                {selectedCategory === 'Fast' ? 'Fetching fast crypto markets…' : 'Loading markets...'}
+                {selectedCategory === 'Fast' ? 'Fetching fast crypto predictions…' : 'Loading predictions...'}
               </span>
             </div>
           </div>
@@ -1067,23 +1067,23 @@ export default function MarketsPage() {
             {selectedCategory === 'Fast' ? (
               <>
                 <Timer className="w-12 h-12 text-amber-700 mx-auto mb-4" />
-                <p className="text-lg text-slate-400 mb-2">No fast-settling markets right now</p>
-                <p className="text-sm text-slate-500">Check back soon — new markets open every few minutes</p>
+                <p className="text-lg text-slate-400 mb-2">No fast-settling predictions right now</p>
+                <p className="text-sm text-slate-500">Check back soon — new predictions open every few minutes</p>
               </>
             ) : (
               <>
                 <Filter className="w-12 h-12 text-slate-700 mx-auto mb-4" />
                 <p className="text-lg text-slate-400 mb-2">
-                  {markets.length === 0 ? 'Loading markets...' : 'No markets found'}
+                  {markets.length === 0 ? 'Loading predictions...' : 'No predictions found'}
                 </p>
                 <p className="text-sm text-slate-500">
                   {markets.length === 0
-                    ? 'Please wait while we fetch markets from Polymarket'
+                    ? 'Please wait while we fetch predictions from Polymarket'
                     : 'Try adjusting your search or filters'}
                 </p>
                 {markets.length > 0 && (
                   <p className="text-xs text-slate-600 mt-2">
-                    Found {markets.length} total markets, but none match "{selectedCategory}"
+                    Found {markets.length} total predictions, but none match "{selectedCategory}"
                   </p>
                 )}
               </>

@@ -16,7 +16,7 @@ import { toast } from 'react-hot-toast';
 
 interface ChartTrade {
   id: string;
-  provider: 'Polymarket' | 'Kalshi';
+  provider: 'Polymarket' | 'Kalshi' | 'RWA' | 'Bags';
   type: string;
   marketId: string;
   marketName: string;

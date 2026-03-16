@@ -1,0 +1,500 @@
+[
+  {
+    "mint": "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF",
+    "symbol": "OPENAI",
+    "name": "OpenAI PreStocks",
+    "coingeckoId": "openai-prestocks-2"
+  },
+  {
+    "mint": "PresTj4Yc2bAR197Er7wz4UUKSfqt6FryBEdAriBoQB",
+    "symbol": "ANDURIL",
+    "name": "Anduril PreStocks",
+    "coingeckoId": "anduril-prestocks-2"
+  },
+  {
+    "mint": "PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh",
+    "symbol": "SPACEX",
+    "name": "SpaceX PreStocks",
+    "coingeckoId": "spacex-prestocks-2"
+  },
+  {
+    "mint": "Pren1FvFX6J3E4kXhJuCiAD5aDmGEb7qJRncwA8Lkhw",
+    "symbol": "ANTHROPIC",
+    "name": "Anthropic PreStocks",
+    "coingeckoId": "anthropic-prestocks-2"
+  },
+  {
+    "mint": "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1",
+    "symbol": "CRCLX",
+    "name": "Circle xStock",
+    "coingeckoId": "circle-xstock"
+  },
+  {
+    "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+    "symbol": "NVDAX",
+    "name": "NVIDIA xStock",
+    "coingeckoId": "nvidia-xstock"
+  },
+  {
+    "mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+    "symbol": "TSLAX",
+    "name": "Tesla xStock",
+    "coingeckoId": "tesla-xstock"
+  },
+  {
+    "mint": "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
+    "symbol": "MSTRX",
+    "name": "MicroStrategy xStock",
+    "coingeckoId": "microstrategy-xstock"
+  },
+  {
+    "mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+    "symbol": "AMZNX",
+    "name": "Amazon xStock",
+    "coingeckoId": "amazon-xstock"
+  },
+  {
+    "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+    "symbol": "SPYX",
+    "name": "SP500 xStock",
+    "coingeckoId": "sp500-xstock"
+  },
+  {
+    "mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+    "symbol": "MSFTX",
+    "name": "Microsoft xStock",
+    "coingeckoId": "microsoft-xstock"
+  },
+  {
+    "mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+    "symbol": "QQQX",
+    "name": "Nasdaq xStock",
+    "coingeckoId": "nasdaq-xstock"
+  },
+  {
+    "mint": "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+    "symbol": "GOOGLX",
+    "name": "Alphabet xStock",
+    "coingeckoId": "alphabet-xstock"
+  },
+  {
+    "mint": "Pre8AREmFPtoJFT8mQSXQLh56cwJmM7CFDRuoGBZiUP",
+    "symbol": "POLYMARKET",
+    "name": "Polymarket PreStocks",
+    "coingeckoId": "polymarket-prestocks"
+  },
+  {
+    "mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+    "symbol": "AAPLX",
+    "name": "Apple xStock",
+    "coingeckoId": "apple-xstock"
+  },
+  {
+    "mint": "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
+    "symbol": "HOODX",
+    "name": "Robinhood xStock",
+    "coingeckoId": "robinhood-xstock"
+  },
+  {
+    "mint": "PreLWGkkeqG1s4HEfFZSy9moCrJ7btsHuUtfcCeoRua",
+    "symbol": "KALSHI",
+    "name": "Kalshi PreStocks",
+    "coingeckoId": "kalshi-prestocks"
+  },
+  {
+    "mint": "Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",
+    "symbol": "COINX",
+    "name": "Coinbase xStock",
+    "coingeckoId": "coinbase-xstock"
+  },
+  {
+    "mint": "iy11ytbSGcUnrjE6Lfv78TFqxKyUESfku1FugS9ondo",
+    "symbol": "SLVON",
+    "name": "iShares Silver Trust (Ondo Tokenized)",
+    "coingeckoId": "ishares-silver-trust-ondo-tokenized-stock"
+  },
+  {
+    "mint": "XsgSaSvNSqLTtFuyWPBhK9196Xb9Bbdyjj4fH3cPJGo",
+    "symbol": "AVGOX",
+    "name": "Broadcom xStock",
+    "coingeckoId": "broadcom-xstock"
+  },
+  {
+    "mint": "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re",
+    "symbol": "GLDX",
+    "name": "Gold xStock",
+    "coingeckoId": "gold-xstock"
+  },
+  {
+    "mint": "rpydAzWdCy85HEmoQkH5PVxYtDYQWjmLxgHHadxondo",
+    "symbol": "USOON",
+    "name": "United States Oil Fund (Ondo Tokenized)",
+    "coingeckoId": "united-states-oil-fund-ondo-tokenized"
+  },
+  {
+    "mint": "XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4",
+    "symbol": "PLTRX",
+    "name": "Palantir xStock",
+    "coingeckoId": "palantir-xstock"
+  },
+  {
+    "mint": "HfsnTS5qtdStwec9DfBrunRqnAMYMMz1kjv9Hu9ondo",
+    "symbol": "PLTRON",
+    "name": "Palantir Technologies (Ondo Tokenized)",
+    "coingeckoId": "palantir-technologies-ondo-tokenized-stock"
+  },
+  {
+    "mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+    "symbol": "METAX",
+    "name": "Meta xStock",
+    "coingeckoId": "meta-xstock"
+  },
+  {
+    "mint": "7tgKziACteG26VjV5xKufojKxwTgCFyTwmWUmz5ondo",
+    "symbol": "CVXON",
+    "name": "Chevron (Ondo Tokenized)",
+    "coingeckoId": "chevron-ondo-tokenized-stock"
+  },
+  {
+    "mint": "cJpUMp5R7rZ6fGeLHbHhrRuJzK9mkyKDjZqNpT3ondo",
+    "symbol": "INTCON",
+    "name": "Intel (Ondo Tokenized)",
+    "coingeckoId": "intel-ondo-tokenized-stock"
+  },
+  {
+    "mint": "Fz9edBpaURPPzpKVRR1A8PENYDEgHqwx5D5th28ondo",
+    "symbol": "MUON",
+    "name": "Micron Technology (Ondo Tokenized)",
+    "coingeckoId": "micron-technology-ondo-tokenized-stock"
+  },
+  {
+    "mint": "Xs2yquAgsHByNzx68WJC55WHjHBvG9JsMB7CWjTLyPy",
+    "symbol": "DFDVX",
+    "name": "DFDV xStock",
+    "coingeckoId": "dfdv-xstock"
+  },
+  {
+    "mint": "XsApJFV9MAktqnAc6jqzsHVujxkGm9xcSUffaBoYLKC",
+    "symbol": "MAX",
+    "name": "Mastercard xStock",
+    "coingeckoId": "mastercard-xstock"
+  },
+  {
+    "mint": "AVw2QGVkXJPRPRjLAceXVoLqU5DVtJ53mdgMXp14yGit",
+    "symbol": "SPYR",
+    "name": "SP500 rStock",
+    "coingeckoId": "sp500-rstock"
+  },
+  {
+    "mint": "XsjFwUPiLofddX5cWFHW35GCbXcSu1BCUGfxoQAQjeL",
+    "symbol": "ORCLX",
+    "name": "Oracle xStock",
+    "coingeckoId": "oracle-xstock"
+  },
+  {
+    "mint": "Xs6B6zawENwAbWVi7w92rjazLuAr5Az59qgWKcNb45x",
+    "symbol": "BRK.BX",
+    "name": "Berkshire Hathaway xStock",
+    "coingeckoId": "berkshire-hathaway-xstock"
+  },
+  {
+    "mint": "X7j77hTmjZJbepkXXBcsEapM8qNgdfihkFj6CZ5ondo",
+    "symbol": "COPXON",
+    "name": "Global X Copper Miners ETF (Ondo Tokenized)",
+    "coingeckoId": "global-x-copper-miners-etf-ondo-tokenized-etf"
+  },
+  {
+    "mint": "XsaHND8sHyfMfsWPj6kSdd5VwvCayZvjYgKmmcNL5qh",
+    "symbol": "XOMX",
+    "name": "Exxon Mobil xStock",
+    "coingeckoId": "exxon-mobil-xstock"
+  },
+  {
+    "mint": "XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2",
+    "symbol": "MCDX",
+    "name": "McDonald's xStock",
+    "coingeckoId": "mcdonald-s-xstock"
+  },
+  {
+    "mint": "XszvaiXGPwvk2nwb3o9C1CX4K6zH8sez11E6uyup6fe",
+    "symbol": "UNHX",
+    "name": "UnitedHealth xStock",
+    "coingeckoId": "unitedhealth-xstock"
+  },
+  {
+    "mint": "7C56WnJ94iEP7YeH2iKiYpvsS5zkcpP9rJBBEBoUGdzj",
+    "symbol": "SLVR",
+    "name": "Silver rStock",
+    "coingeckoId": "silver-rstock"
+  },
+  {
+    "mint": "C3VLBJB2FhEb47s1WEgroyn3BnSYXaezqtBuu5WNmUGw",
+    "symbol": "CPERR",
+    "name": "Copper rStock",
+    "coingeckoId": "copper-rstock"
+  },
+  {
+    "mint": "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",
+    "symbol": "NVDAON",
+    "name": "NVIDIA (Ondo Tokenized)",
+    "coingeckoId": "nvidia-ondo-tokenized-stock"
+  },
+  {
+    "mint": "A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6",
+    "symbol": "USDY",
+    "name": "Ondo US Dollar Yield",
+    "coingeckoId": "ondo-us-dollar-yield"
+  },
+  {
+    "mint": "XsNNMt7WTNA2sV3jrb1NNfNgapxRF5i4i6GcnTRRHts",
+    "symbol": "CVXX",
+    "name": "Chevron xStock",
+    "coingeckoId": "chevron-xstock"
+  },
+  {
+    "mint": "keybg184d4vyXeQdFqs4o99YsMg7xBthxTJ6Ky3ondo",
+    "symbol": "TSMON",
+    "name": "Taiwan Semiconductor Manufacturing (Ondo Tokenized)",
+    "coingeckoId": "taiwan-semiconductor-manufacturing-ondo-tokenized-stock"
+  },
+  {
+    "mint": "5fKr9joRHpioriGmMgRVFdmZge8EVUTbrWyxDVdSrcuG",
+    "symbol": "CRCLR",
+    "name": "Circle rStock",
+    "coingeckoId": "circle-rstock"
+  },
+  {
+    "mint": "EtTQ2QRyf33bd6B2uk7nm1nkinrdGKza66EGdjEY4s7o",
+    "symbol": "PPLTR",
+    "name": "Platinum rStock",
+    "coingeckoId": "platinum-rstock"
+  },
+  {
+    "mint": "k18WJUULWheRkSpSquYGdNNmtuE2Vbw1hpuUi92ondo",
+    "symbol": "SPYON",
+    "name": "SPDR S&P 500 ETF (Ondo Tokenized)",
+    "coingeckoId": "spdr-s-p-500-etf-ondo-tokenized-etf"
+  },
+  {
+    "mint": "PreC1KtJ1sBPPqaeeqL6Qb15GTLCYVvyYEwxhdfTwfx",
+    "symbol": "XAI",
+    "name": "xAI PreStocks",
+    "coingeckoId": "xai-prestocks-2"
+  },
+  {
+    "mint": "XsjQP3iMAaQ3kQScQKthQpx9ALRbjKAjQtHg6TFomoc",
+    "symbol": "TQQQX",
+    "name": "TQQQ xStock",
+    "coingeckoId": "tqqq-xstock"
+  },
+  {
+    "mint": "XsaBXg8dU5cPM6ehmVctMkVqoiRG2ZjMo1cyBJ3AykQ",
+    "symbol": "KOX",
+    "name": "Coca-Cola xStock",
+    "coingeckoId": "coca-cola-xstock"
+  },
+  {
+    "mint": "B8GKqTDGYc7F6udTHjYeazZ4dFCRkrwK2mBQNS4igqTv",
+    "symbol": "MSTRR",
+    "name": "Strategy rStock",
+    "coingeckoId": "strategy-rstock"
+  },
+  {
+    "mint": "XsfAzPzYrYjd4Dpa9BU3cusBsvWfVB9gBcyGC87S57n",
+    "symbol": "NVOX",
+    "name": "Novo Nordisk xStock",
+    "coingeckoId": "novo-nordisk-xstock"
+  },
+  {
+    "mint": "KeGv7bsfR4MheC1CkmnAVceoApjrkvBhHYjWb67ondo",
+    "symbol": "TSLAON",
+    "name": "Tesla (Ondo Tokenized)",
+    "coingeckoId": "tesla-ondo-tokenized-stock"
+  },
+  {
+    "mint": "bbahNA5vT9WJeYft8tALrH1LXWffjwqVoUbqYa1ondo",
+    "symbol": "GOOGLON",
+    "name": "Alphabet Class A (Ondo Tokenized)",
+    "coingeckoId": "alphabet-class-a-ondo-tokenized-stock"
+  },
+  {
+    "mint": "eGGxZwNSfuNKRqQLKaz2hc4QkA2mau7skyxPdj7ondo",
+    "symbol": "LLYON",
+    "name": "Eli Lilly (Ondo Tokenized)",
+    "coingeckoId": "eli-lilly-ondo-tokenized-stock"
+  },
+  {
+    "mint": "Xsnuv4omNoHozR6EEW5mXkw8Nrny5rB3jVfLqi6gKMH",
+    "symbol": "LLYX",
+    "name": "Eli Lilly xStock",
+    "coingeckoId": "eli-lilly-xstock"
+  },
+  {
+    "mint": "FJug3z58gssSTDhVNkTse5fP8GRZzuidf9SRtfB2RhDe",
+    "symbol": "TSLAR",
+    "name": "Tesla rStock",
+    "coingeckoId": "tesla-rstock"
+  },
+  {
+    "mint": "XsaQTCgebC2KPbf27KUhdv5JFvHhQ4GDAPURwrEhAzb",
+    "symbol": "AMBRX",
+    "name": "AMBRx xStock",
+    "coingeckoId": "amber-xstock"
+  },
+  {
+    "mint": "XsqgsbXwWogGJsNcVZ3TyVouy2MbTkfCFhCGGGcQZ2p",
+    "symbol": "VX",
+    "name": "Visa xStock",
+    "coingeckoId": "visa-xstock"
+  },
+  {
+    "mint": "XsMAqkcKsUewDrzVkait4e5u4y8REgtyS7jWgCpLV2C",
+    "symbol": "JPMX",
+    "name": "JPMorgan Chase xStock",
+    "coingeckoId": "jpmorgan-chase-xstock"
+  },
+  {
+    "mint": "XsEH7wWfJJu2ZT3UCFeVfALnVA6CP5ur7Ee11KmzVpL",
+    "symbol": "NFLXX",
+    "name": "Netflix xStock",
+    "coingeckoId": "netflix-xstock"
+  },
+  {
+    "mint": "XsnQnU7AdbRZYe2akqqpibDdXjkieGFfSkbkjX1Sd1X",
+    "symbol": "MRKX",
+    "name": "Merck xStock",
+    "coingeckoId": "merck-xstock"
+  },
+  {
+    "mint": "Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc",
+    "symbol": "GMEX",
+    "name": "Gamestop xStock",
+    "coingeckoId": "gamestop-xstock"
+  },
+  {
+    "mint": "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu",
+    "symbol": "NVDAR",
+    "name": "NVIDIA rStock",
+    "coingeckoId": "nvidia-rstock"
+  },
+  {
+    "mint": "Xsv99frTRUeornyvCfvhnDesQDWuvns1M852Pez91vF",
+    "symbol": "PEPX",
+    "name": "PepsiCo xStock",
+    "coingeckoId": "pepsico-xstock"
+  },
+  {
+    "mint": "Xs3ZFkPYT2BN7qBMqf1j1bfTeTm1rFzEFSsQ1z3wAKU",
+    "symbol": "AZNX",
+    "name": "AstraZeneca xStock",
+    "coingeckoId": "astrazeneca-xstock"
+  },
+  {
+    "mint": "AEv6xLECJ2KKmwFGX85mHb9S2c2BQE7dqE5midyrXHBb",
+    "symbol": "GLDR",
+    "name": "Gold rStock",
+    "coingeckoId": "gold-rstock"
+  },
+  {
+    "mint": "hWfiw4mcxT8rnNFkk6fsCQSxoxgZ9yVhB6tyeVcondo",
+    "symbol": "GLDON",
+    "name": "SPDR Gold Shares (Ondo Tokenized)",
+    "coingeckoId": "spdr-gold-shares-ondo-tokenized"
+  },
+  {
+    "mint": "XsHtf5RpxsQ7jeJ9ivNewouZKJHbPxhPoEy6yYvULr7",
+    "symbol": "ABTX",
+    "name": "Abbott xStock",
+    "coingeckoId": "abbott-xstock"
+  },
+  {
+    "mint": "XsSr8anD1hkvNMu8XQiVcmiaTP7XGvYu7Q58LdmtE8Z",
+    "symbol": "LINX",
+    "name": "Linde xStock",
+    "coingeckoId": "linde-xstock"
+  },
+  {
+    "mint": "XsYdjDjNUygZ7yGKfQaB6TxLh2gC6RRjzLtLAGJrhzV",
+    "symbol": "PGX",
+    "name": "Procter & Gamble xStock",
+    "coingeckoId": "procter-gamble-xstock"
+  },
+  {
+    "mint": "Xs5UJzmCRQ8DWZjskExdSQDnbE6iLkRu2jjrRAB1JSU",
+    "symbol": "ACNX",
+    "name": "Accenture xStock",
+    "coingeckoId": "accenture-xstock"
+  },
+  {
+    "mint": "aznKt8v32CwYMEcTcB4bGTv8DXWStCpHrcCtyy7ondo",
+    "symbol": "GMEON",
+    "name": "GameStop (Ondo Tokenized)",
+    "coingeckoId": "gamestop-ondo-tokenized-stock"
+  },
+  {
+    "mint": "XszjVtyhowGjSC5odCqBpW1CtXXwXjYokymrk7fGKD3",
+    "symbol": "HDX",
+    "name": "Home Depot xStock",
+    "coingeckoId": "home-depot-xstock"
+  },
+  {
+    "mint": "XswbinNKyPmzTa5CskMbCPvMW6G5CMnZXZEeQSSQoie",
+    "symbol": "ABBVX",
+    "name": "AbbVie xStock",
+    "coingeckoId": "abbvie-xstock"
+  },
+  {
+    "mint": "XsvKCaNsxg2GN8jjUmq71qukMJr7Q1c5R2Mk9P8kcS8",
+    "symbol": "CMCSAX",
+    "name": "Comcast xStock",
+    "coingeckoId": "comcast-xstock"
+  },
+  {
+    "mint": "XsuxRGDzbLjnJ72v74b7p9VY6N66uYgTCyfwwRjVCJA",
+    "symbol": "MRVLX",
+    "name": "Marvell xStock",
+    "coingeckoId": "marvell-xstock"
+  },
+  {
+    "mint": "Xsr3pdLQyXvDJBFgpR5nexCEZwXvigb8wbPYp4YoNFf",
+    "symbol": "CSCOX",
+    "name": "Cisco xStock",
+    "coingeckoId": "cisco-xstock"
+  },
+  {
+    "mint": "XshPgPdXFRWB8tP1j82rebb2Q9rPgGX37RuqzohmArM",
+    "symbol": "INTCX",
+    "name": "Intel xStock",
+    "coingeckoId": "intel-xstock"
+  },
+  {
+    "mint": "XsGVi5eo1Dh2zUpic4qACcjuWGjNv8GCt3dm5XcX6Dn",
+    "symbol": "JNJX",
+    "name": "Johnson & Johnson xStock",
+    "coingeckoId": "johnson-johnson-xstock"
+  },
+  {
+    "mint": "XsAtbqkAP1HJxy7hFDeq7ok6yM43DQ9mQ1Rh861X8rw",
+    "symbol": "PFEX",
+    "name": "Pfizer xStock",
+    "coingeckoId": "pfizer-xstock"
+  },
+  {
+    "mint": "Xs8drBWy3Sd5QY3aifG9kt9KFs2K3PGZmx7jWrsrk57",
+    "symbol": "TMOX",
+    "name": "Thermo Fisher xStock",
+    "coingeckoId": "thermo-fisher-xstock"
+  },
+  {
+    "mint": "Xs151QeqTCiuKtinzfRATnUESM2xTU6V9Wy8Vy538ci",
+    "symbol": "WMTX",
+    "name": "Walmart xStock",
+    "coingeckoId": "walmart-xstock"
+  },
+  {
+    "mint": "9eS6ZsnqNJGGKWq8LqZ95YJLZ219oDuJ1qjsLoKcQkmQ",
+    "symbol": "PALLR",
+    "name": "Palladium rStock",
+    "coingeckoId": "palladium-rstock"
+  }
+]

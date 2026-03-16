@@ -126,6 +126,8 @@ export default function LandingPage() {
 
   const isMarketsActive = pathname.startsWith('/markets');
   const isTerminalActive = pathname.startsWith('/terminal');
+  const isStocksActive = pathname.startsWith('/stocks');
+  const isBagsActive = pathname.startsWith('/bags');
 
   return (
     <div className="min-h-screen bg-[#050505] bg-radial-glow flex flex-col items-center overflow-x-hidden relative">
@@ -158,7 +160,7 @@ export default function LandingPage() {
                   isMarketsActive ? 'border-[#4FFFC8]/70' : 'border-transparent'
                 } transition-colors`}
               >
-                Markets
+                Predictions
               </Link>
               <Link
                 href="/terminal"
@@ -169,6 +171,26 @@ export default function LandingPage() {
                 } transition-colors`}
               >
                 Terminal
+              </Link>
+              <Link
+                href="/stocks"
+                className={`text-xs font-semibold tracking-[0.18em] ${
+                  isStocksActive ? 'text-white' : 'text-slate-400 hover:text-[#4FFFC8]'
+                } pb-0.5 border-b ${
+                  isStocksActive ? 'border-[#4FFFC8]/70' : 'border-transparent'
+                } transition-colors`}
+              >
+                RWAs
+              </Link>
+              <Link
+                href="/bags"
+                className={`text-xs font-semibold tracking-[0.18em] ${
+                  isBagsActive ? 'text-white' : 'text-slate-400 hover:text-[#4FFFC8]'
+                } pb-0.5 border-b ${
+                  isBagsActive ? 'border-[#4FFFC8]/70' : 'border-transparent'
+                } transition-colors`}
+              >
+                Bags
               </Link>
               {mounted && user ? (
                 <div className="flex items-center gap-4">
@@ -296,7 +318,7 @@ export default function LandingPage() {
                 <div className="h-px sm:h-6 w-full sm:w-px bg-[#1A1A1A] sm:mx-3" />
                 <div className="flex items-baseline gap-2">
                   <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500 font-semibold">
-                    Markets live
+                    Predictions live
                   </span>
                   <span className="font-mono text-sm text-slate-300 tabular-nums">
                     {marketsLive || '—'}
@@ -308,7 +330,7 @@ export default function LandingPage() {
                     Venues
                   </span>
                   <span className="font-mono text-sm text-slate-300">
-                    Polymarket · Kalshi
+                    Polymarket · Kalshi · Dflow RWAs · Bags
                   </span>
                 </div>
               </div>
@@ -432,7 +454,7 @@ export default function LandingPage() {
           <div className="max-w-6xl w-full px-6 flex flex-col items-center">
             <div className="w-full flex flex-col items-center text-center mb-10 gap-6">
               <div className="text-center">
-                <h2 className="text-xl font-bold text-white mb-3">Live markets</h2>
+                <h2 className="text-xl font-bold text-white mb-3">Live predictions</h2>
                 <p className="text-slate-400 text-sm">
                   Live data from Polymarket and Kalshi. Filter by venue to mirror the terminal.
                 </p>
@@ -459,7 +481,7 @@ export default function LandingPage() {
                 </p>
               </div>
               <Link href="/markets" className="px-8 py-3 bg-transparent border border-[#1A1A1A] text-white font-bold rounded-full flex items-center gap-3 hover:border-[#4FFFC8]/30 hover:bg-[#4FFFC8]/5 transition-all tracking-widest uppercase text-xs">
-                Browse Markets <ChevronRight className="w-5 h-5" />
+                Browse Predictions <ChevronRight className="w-5 h-5" />
               </Link>
             </div>
 
@@ -618,12 +640,12 @@ export default function LandingPage() {
                 className="group relative overflow-hidden bg-[#0a0a0a] border border-[#1A1A1A] rounded-2xl hover:border-[#4FFFC8]/30 transition-all"
               >
                 <Link href="/markets" className="block">
-                  {/* Markets Explorer Mockup */}
+                  {/* Predictions Explorer Mockup */}
                   <div className="w-full aspect-[16/9] overflow-hidden border-b border-[#1A1A1A] bg-[#060606] p-4 group-hover:bg-[#080808] transition-colors">
                     {/* Search bar mockup */}
                     <div className="flex items-center gap-2 mb-3">
                       <div className="flex-1 h-7 rounded-full bg-white/[0.04] border border-[#1A1A1A] flex items-center px-3">
-                        <span className="text-[10px] text-slate-600">🔍 Search markets...</span>
+                        <span className="text-[10px] text-slate-600">🔍 Search predictions...</span>
                       </div>
                       <div className="flex gap-1">
                         <span className="px-2 py-1 rounded-full bg-[#4FFFC8]/10 border border-[#4FFFC8]/20 text-[8px] text-[#4FFFC8] font-bold">ALL</span>
@@ -661,14 +683,14 @@ export default function LandingPage() {
                       <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
                         <Grid3x3 className="w-4 h-4 text-blue-400" strokeWidth={1.5} />
                       </div>
-                      <h3 className="text-lg font-black text-white uppercase tracking-tighter">Markets Explorer</h3>
+                      <h3 className="text-lg font-black text-white uppercase tracking-tighter">Predictions Explorer</h3>
                     </div>
                     <p className="text-slate-400 text-sm font-medium leading-relaxed mb-4">
                       Browse thousands of live prediction markets across both platforms. Filter by category, track volume, 
                       and compare odds — with provider badges, images, and real-time probability updates on every card.
                     </p>
                     <div className="flex items-center gap-2 text-[#4FFFC8] text-sm font-bold uppercase tracking-wider">
-                      Explore Markets <ChevronRight className="w-4 h-4" />
+                      Explore Predictions <ChevronRight className="w-4 h-4" />
                     </div>
                   </div>
                 </Link>
@@ -694,14 +716,14 @@ export default function LandingPage() {
                   <Monitor className="w-5 h-5 text-[#4FFFC8]" strokeWidth={1.5} />
                 </div>
                 <h3 className="text-sm font-semibold text-white mb-2">Open terminal</h3>
-                <p className="text-slate-500 text-sm">One feed for Polymarket and Kalshi with live execution.</p>
+                <p className="text-slate-500 text-sm">One live feed across predictions, RWAs, and Bags tokens.</p>
               </div>
               <div>
                 <div className="w-10 h-10 rounded-full bg-[#4FFFC8]/10 border border-[#4FFFC8]/20 flex items-center justify-center mx-auto mb-4">
                   <BarChart3 className="w-5 h-5 text-[#4FFFC8]" strokeWidth={1.5} />
                 </div>
                 <h3 className="text-sm font-semibold text-white mb-2">Trade & track</h3>
-                <p className="text-slate-500 text-sm">Filter by category, compare odds, and manage positions.</p>
+                <p className="text-slate-500 text-sm">Trade predictions, tokenized RWAs, and Bags tokens in one place.</p>
               </div>
             </div>
           </div>
@@ -752,17 +774,17 @@ export default function LandingPage() {
               <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
                 <Monitor className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
                 <h3 className="text-sm font-semibold text-white mb-2">Unified terminal</h3>
-                <p className="text-slate-500 text-sm">One live feed for Polymarket and Kalshi with execution and activity.</p>
+                <p className="text-slate-500 text-sm">Unified live feed across predictions, RWAs, and Bags tokens with fast actions.</p>
               </div>
               <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
                 <Grid3x3 className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
-                <h3 className="text-sm font-semibold text-white mb-2">Markets explorer</h3>
+                <h3 className="text-sm font-semibold text-white mb-2">Predictions explorer</h3>
                 <p className="text-slate-500 text-sm">Browse and filter by category with real-time prices and volume.</p>
               </div>
               <div className="p-6 bg-[#0a0a0a] border border-[#1A1A1A] rounded-xl text-center">
                 <Activity className="w-6 h-6 text-[#4FFFC8] mx-auto mb-4" strokeWidth={1.5} />
-                <h3 className="text-sm font-semibold text-white mb-2">Cross-venue view</h3>
-                <p className="text-slate-500 text-sm">Compare odds and spot opportunities across both venues.</p>
+                <h3 className="text-sm font-semibold text-white mb-2">RWAs + Bags trading</h3>
+                <p className="text-slate-500 text-sm">Trade tokenized RWAs via Dflow and Bags tokens via the Bags API.</p>
               </div>
             </div>
           </div>
@@ -816,6 +838,8 @@ export default function LandingPage() {
               <ul className="space-y-4 text-xs text-slate-500">
                 <li><Link href="/markets" className="hover:text-[#4FFFC8] transition-colors">Live Markets</Link></li>
                 <li><Link href="/terminal" className="hover:text-[#4FFFC8] transition-colors">Terminal</Link></li>
+                <li><Link href="/stocks" className="hover:text-[#4FFFC8] transition-colors">RWAs</Link></li>
+                <li><Link href="/bags" className="hover:text-[#4FFFC8] transition-colors">Bags</Link></li>
                 <li><Link href="/leaderboard" className="hover:text-[#4FFFC8] transition-colors">Leaderboard</Link></li>
               </ul>
             </div>
@@ -865,16 +889,16 @@ function InteractiveGridSection() {
         }}
       />
       <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
-        <h2 className="text-xl font-bold text-white mb-6">Polymarket and Kalshi in one place</h2>
+        <h2 className="text-xl font-bold text-white mb-6">Everything Synq offers</h2>
         <p className="text-slate-500 text-sm max-w-lg mx-auto mb-10">
-          Connect your wallet and trade from a single terminal. Live feed, real-time prices, and execution across both venues.
+          One wallet-native platform for predictions, tokenized RWAs, and Bags tokens. Use the terminal for live activity and fast execution, or use each section to discover and trade.
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: 'Venues', value: 'Polymarket · Kalshi' },
-            { label: 'Auth', value: 'Wallet only' },
-            { label: 'Feed', value: 'Live execution' },
-            { label: 'Custody', value: 'Self-custody' },
+            { label: 'Predictions', value: 'Polymarket · Kalshi' },
+            { label: 'RWAs', value: 'Dflow trading + charts' },
+            { label: 'Bags', value: 'Bags API swaps + pools' },
+            { label: 'Terminal', value: 'Unified live feed' },
           ].map((item) => (
             <div
               key={item.label}

@@ -22,6 +22,7 @@ import {
   Wifi,
   WifiOff,
   Users,
+  Briefcase,
   DollarSign,
   Eye,
   Layers,
@@ -47,6 +48,12 @@ import { Market } from '@/lib/types';
 import TradePanel from '../components/TradePanel';
 import { useAuth } from '../components/AuthProvider';
 import { toast } from 'react-hot-toast';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { Connection, VersionedTransaction, clusterApiUrl } from '@solana/web3.js';
+import { Buffer } from 'buffer';
+import { RWA_TOKENS } from '@/lib/rwa-tokens';
+import type { JupStockDetail } from '@/lib/jup-stocks';
+import RwaDetailPanel from '../components/RwaDetailPanel';
 
 // Lazy load ChartModal for better initial performance
 const ChartModal = dynamic(() => import('../components/ChartModal'), { ssr: false });
@@ -57,7 +64,7 @@ const ChartModal = dynamic(() => import('../components/ChartModal'), { ssr: fals
 
 interface TerminalTrade {
   id: string;
-  provider: 'Polymarket' | 'Kalshi';
+  provider: 'Polymarket' | 'Kalshi' | 'RWA' | 'Bags';
   type: 'BUY' | 'SELL' | 'FILL' | 'ORDER' | 'FEE_REFUND';
   marketId: string;
   marketName: string;
@@ -106,7 +113,7 @@ interface ArbitrageSignal {
 
 interface MarketTick {
   id: string;
-  provider: 'Polymarket' | 'Kalshi';
+  provider: 'Polymarket' | 'Kalshi' | 'RWA';
   name: string;
   price: number;
   prevPrice: number;
@@ -204,13 +211,14 @@ const TUTORIAL_SLIDES = [
 // MAIN TERMINAL PAGE
 // ============================================================================
 
-type TabId = 'live' | 'whales' | 'arbitrage' | 'scanner' | 'wallet';
+type TabId = 'live' | 'whales' | 'arbitrage' | 'scanner' | 'positions' | 'wallet';
 
 const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: 'live', label: 'Live Ticker', icon: Radio },
   { id: 'whales', label: 'Whale Alerts', icon: Eye },
   { id: 'arbitrage', label: 'Arbitrage', icon: Zap },
   { id: 'scanner', label: 'Scanner', icon: Search },
+  { id: 'positions', label: 'Positions', icon: Briefcase },
   { id: 'wallet', label: 'Wallet', icon: Users },
 ];
 
@@ -227,13 +235,13 @@ export default function TerminalPage() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [scannerFilter, setScannerFilter] = useState<'all' | 'Polymarket' | 'Kalshi'>('all');
+  const [scannerFilter, setScannerFilter] = useState<'all' | 'Polymarket' | 'Kalshi' | 'RWA'>('all');
   const [scannerCategory, setScannerCategory] = useState('All');
   const [scannerSearch, setScannerSearch] = useState('');
   const [liveSubTab, setLiveSubTab] = useState<'all' | 'orders' | 'fills'>('all');
   const [isMobile, setIsMobile] = useState<boolean | null>(null);
   // ── Advanced Filters ──
-  const [filterProvider, setFilterProvider] = useState<'all' | 'Polymarket' | 'Kalshi'>('all');
+  const [filterProvider, setFilterProvider] = useState<'all' | 'Polymarket' | 'Kalshi' | 'RWA' | 'Bags'>('all');
   const [filterSide, setFilterSide] = useState<'all' | 'Yes' | 'No'>('all');
   const [filterMinNotional, setFilterMinNotional] = useState<number>(0);
   const [filterPriceRange, setFilterPriceRange] = useState<'all' | '0-25' | '25-50' | '50-75' | '75-100'>('all');
@@ -270,6 +278,10 @@ export default function TerminalPage() {
   const tradeListRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const walletCacheRef = useRef<string | null>(null);
+  const rwaStocksRef = useRef<JupStockDetail[]>([]);
+  const rwaTradesRef = useRef<TerminalTrade[]>([]);
+  const bagsMintsRef = useRef<string[]>([]);
+  const bagsTradesRef = useRef<TerminalTrade[]>([]);
 
   // Keep pause ref in sync for use inside polling closure
   feedPausedRef.current = feedPaused;
@@ -278,6 +290,16 @@ export default function TerminalPage() {
 
   const { user } = useAuth();
   const router = useRouter();
+  const { publicKey, connected: walletConnected, signTransaction } = useWallet();
+  const rpcUrl = useMemo(
+    () => process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl('mainnet-beta'),
+    []
+  );
+  const connection = useMemo(() => new Connection(rpcUrl, { commitment: 'confirmed' }), [rpcUrl]);
+
+  const [jupPositions, setJupPositions] = useState<any[]>([]);
+  const [jupPositionsLoading, setJupPositionsLoading] = useState(false);
+  const [jupActionBusy, setJupActionBusy] = useState<string | null>(null);
 
   // ── Load instant trade settings from localStorage ──
   useEffect(() => {
@@ -288,6 +310,108 @@ export default function TerminalPage() {
       if (!tutorialSeen) setShowTutorial(true);
     } catch {}
   }, []);
+
+  // Allow other components (e.g. TradePanel) to request opening the Positions tab
+  useEffect(() => {
+    const handler = () => setActiveTab('positions');
+    window.addEventListener('open-positions-tab', handler as any);
+    return () => window.removeEventListener('open-positions-tab', handler as any);
+  }, []);
+
+  const loadJupPositions = useCallback(async () => {
+    if (!publicKey) return;
+    setJupPositionsLoading(true);
+    try {
+      const res = await fetch(`/api/jup/prediction/positions?ownerPubkey=${encodeURIComponent(publicKey.toBase58())}`);
+      const data = await res.json();
+      const positions = data?.data || data?.positions || [];
+      setJupPositions(Array.isArray(positions) ? positions : []);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load Jupiter positions');
+    } finally {
+      setJupPositionsLoading(false);
+    }
+  }, [publicKey]);
+
+  useEffect(() => {
+    if (activeTab !== 'positions') return;
+    if (!publicKey) return;
+    loadJupPositions();
+    const t = setInterval(loadJupPositions, 6000);
+    return () => clearInterval(t);
+  }, [activeTab, publicKey, loadJupPositions]);
+
+  const signAndSendBase64Tx = useCallback(
+    async (txB64: string) => {
+      if (!walletConnected || !publicKey) throw new Error('Wallet not connected');
+      if (typeof signTransaction !== 'function') throw new Error('Wallet cannot sign transactions');
+      const tx = VersionedTransaction.deserialize(Buffer.from(txB64, 'base64'));
+      const signed = await signTransaction(tx);
+      const latest = await connection.getLatestBlockhash({ commitment: 'confirmed' });
+      const sig = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: true,
+        maxRetries: 2,
+      });
+      await connection.confirmTransaction(
+        { signature: sig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
+        'confirmed'
+      );
+      return sig;
+    },
+    [walletConnected, publicKey, signTransaction, connection]
+  );
+
+  const handleCloseJupPosition = useCallback(
+    async (positionPubkey: string) => {
+      if (!publicKey) return;
+      setJupActionBusy(positionPubkey);
+      try {
+        const resp = await fetch(`/api/jup/prediction/positions/${encodeURIComponent(positionPubkey)}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ownerPubkey: publicKey.toBase58() }),
+        }).then((r) => r.json());
+
+        if (resp?.error) throw new Error(resp.error);
+        const txB64 = resp?.transaction;
+        if (!txB64) throw new Error('Close position did not return a transaction');
+        const sig = await signAndSendBase64Tx(txB64);
+        toast.success(`Position close sent: ${sig.slice(0, 4)}…${sig.slice(-4)}`);
+        await loadJupPositions();
+      } catch (e: any) {
+        toast.error(e?.message || 'Failed to close position');
+      } finally {
+        setJupActionBusy(null);
+      }
+    },
+    [publicKey, signAndSendBase64Tx, loadJupPositions]
+  );
+
+  const handleClaimJupPosition = useCallback(
+    async (positionPubkey: string) => {
+      if (!publicKey) return;
+      setJupActionBusy(positionPubkey);
+      try {
+        const resp = await fetch(`/api/jup/prediction/positions/${encodeURIComponent(positionPubkey)}/claim`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ownerPubkey: publicKey.toBase58() }),
+        }).then((r) => r.json());
+
+        if (resp?.error) throw new Error(resp.error);
+        const txB64 = resp?.transaction;
+        if (!txB64) throw new Error('Claim did not return a transaction');
+        const sig = await signAndSendBase64Tx(txB64);
+        toast.success(`Claim sent: ${sig.slice(0, 4)}…${sig.slice(-4)}`);
+        await loadJupPositions();
+      } catch (e: any) {
+        toast.error(e?.message || 'Failed to claim payout');
+      } finally {
+        setJupActionBusy(null);
+      }
+    },
+    [publicKey, signAndSendBase64Tx, loadJupPositions]
+  );
 
   // ── Detect mobile / small-screen devices to gate the terminal ──
   // Uses null → true/false tri-state so nothing renders until we know for sure.
@@ -417,6 +541,21 @@ export default function TerminalPage() {
   const executeInstantTrade = useCallback(async (trade: TerminalTrade | WhaleAlert, quantityOverride?: number) => {
     if (!user) {
       toast.error('Please sign in to trade');
+      return;
+    }
+
+    // For RWA stock trades, route to the RWA detail panel instead of using
+    // the Polymarket/Kalshi instant trade endpoint.
+    if ('provider' in trade && trade.provider === 'RWA') {
+      const all = rwaStocksRef.current || [];
+      const rwaFromMint = all.find((s) => s.mint === trade.marketId);
+      const rwaFromSymbol = rwaFromMint || all.find((s) => s.symbol === trade.marketName);
+      const target = rwaFromMint || rwaFromSymbol || null;
+      if (target) {
+        setSelectedRwa(target);
+        return;
+      }
+      toast.error('RWA trade details unavailable for instant trade');
       return;
     }
 
@@ -647,7 +786,49 @@ export default function TerminalPage() {
 
         if (!mounted) return;
 
-        const incoming: TerminalTrade[] = data.trades || [];
+        let incoming: TerminalTrade[] = data.trades || [];
+
+        // Merge in any locally-buffered RWA trades (last 1h) so they
+        // persist across backend snapshot refreshes.
+        try {
+          const nowTs = Date.now();
+          const ONE_HOUR = 60 * 60 * 1000;
+          const rwa = (rwaTradesRef.current || []).filter((t) => {
+            const ts = Date.parse(t.timestamp);
+            return !Number.isNaN(ts) && (nowTs - ts) <= ONE_HOUR;
+          });
+          const byId = new Map<string, TerminalTrade>();
+          for (const t of [...incoming, ...rwa]) {
+            if (!t || !t.id) continue;
+            byId.set(t.id, t);
+          }
+          incoming = Array.from(byId.values()).sort(
+            (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
+          );
+        } catch {
+          // ignore merge errors; fall back to backend snapshot
+        }
+
+        // Merge in any locally-buffered Bags trades (last 1h) so they
+        // persist across backend snapshot refreshes.
+        try {
+          const nowTs = Date.now();
+          const ONE_HOUR = 60 * 60 * 1000;
+          const bags = (bagsTradesRef.current || []).filter((t) => {
+            const ts = Date.parse(t.timestamp);
+            return !Number.isNaN(ts) && (nowTs - ts) <= ONE_HOUR;
+          });
+          const byId = new Map<string, TerminalTrade>();
+          for (const t of [...incoming, ...bags]) {
+            if (!t || !t.id) continue;
+            byId.set(t.id, t);
+          }
+          incoming = Array.from(byId.values()).sort(
+            (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
+          );
+        } catch {
+          // ignore
+        }
 
         if (feedPausedRef.current) {
           // While paused: buffer new trades but don't update the visible list
@@ -655,7 +836,7 @@ export default function TerminalPage() {
           const bufferIds = new Set(pauseBufferRef.current.map(t => t.id));
           const brandNew = incoming.filter(t => !existingIds.has(t.id) && !bufferIds.has(t.id));
           if (brandNew.length > 0) {
-            pauseBufferRef.current = [...brandNew, ...pauseBufferRef.current].slice(0, 300);
+            pauseBufferRef.current = [...brandNew, ...pauseBufferRef.current].slice(0, 600);
           }
           // Still update stats, whale alerts, arb signals etc. even while paused
           setStats(data.stats || null);
@@ -690,11 +871,11 @@ export default function TerminalPage() {
         }
 
         setTrades(prev => {
-          if (prev.length === 0) return incoming.slice(0, 300);
+          if (prev.length === 0) return incoming.slice(0, 600);
           const existingIds = new Set(prev.map(t => t.id));
           const brandNew = incoming.filter(t => !existingIds.has(t.id));
           if (brandNew.length === 0) return prev;
-          return [...brandNew, ...prev].slice(0, 300);
+          return [...brandNew, ...prev].slice(0, 600);
         });
 
         const incomingWhales: WhaleAlert[] = data.whaleAlerts || [];
@@ -803,7 +984,428 @@ export default function TerminalPage() {
     return true;
   }), [marketTicks, scannerFilter, scannerCategory, scannerSearch]);
 
-  const categories = useMemo(() => ['All', ...Array.from(new Set(marketTicks.map(t => t.category)))], [marketTicks]);
+  const categories = useMemo(
+    () => ['All', ...Array.from(new Set(marketTicks.map(t => t.category)))],
+    [marketTicks]
+  );
+
+  // ── RWA stocks (Jupiter): list from API + detail panel ──
+  const [rwaStocks, setRwaStocks] = useState<JupStockDetail[]>([]);
+  const [selectedRwa, setSelectedRwa] = useState<JupStockDetail | null>(null);
+
+  useEffect(() => {
+    const fetchStocks = async () => {
+      try {
+        const res = await fetch('/api/stocks/dflow', { cache: 'no-store' });
+        const data = await res.json();
+        if (Array.isArray(data?.stocks)) {
+          setRwaStocks(data.stocks);
+          return;
+        }
+      } catch {}
+      const filled = RWA_TOKENS.filter((t) => t.mint);
+      if (filled.length === 0) return;
+      const ids = filled.map((t) => t.mint).join(',');
+      try {
+        const res = await fetch(`https://api.jup.ag/price/v2?ids=${encodeURIComponent(ids)}`);
+        const data = await res.json();
+        const out: Record<string, { price: number; change24h?: number; volume24h?: number }> = {};
+        for (const token of filled) {
+          const entry = data.data?.[token.mint];
+          if (entry) {
+            out[token.mint] = {
+              price: entry.price || 0,
+              change24h: entry.priceChange24h,
+              volume24h: entry.volume24h,
+            };
+          }
+        }
+        setRwaStocks(
+          filled.map((t) => ({
+            ...t,
+            price: out[t.mint]?.price ?? 0,
+            stats: {
+              priceChange24h: out[t.mint]?.change24h,
+              volume24h: out[t.mint]?.volume24h,
+            },
+            links: {},
+          }))
+        );
+      } catch {
+        // Soft fail; RWA section just won’t update
+      }
+    };
+    fetchStocks();
+    const t = setInterval(fetchStocks, 20000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    rwaStocksRef.current = rwaStocks;
+  }, [rwaStocks]);
+
+  // ── Load Bags pool mints (for market-wide Bags trades feed) ──
+  useEffect(() => {
+    let cancelled = false;
+    const normalizeBagsMint = (raw: string) =>
+      String(raw || '').trim().replace(/\.BAGS$/i, '');
+    const run = async () => {
+      try {
+        const res = await fetch('/api/bags/pools', { cache: 'no-store' });
+        const json = await res.json();
+        if (!res.ok) return;
+        const pools = Array.isArray(json?.pools) ? json.pools : [];
+        const mints = pools
+          .map((p: any) => p?.tokenMint)
+          .filter((m: any) => typeof m === 'string' && m.length > 0)
+          .map((m: string) => normalizeBagsMint(m))
+          .filter((m: any) => typeof m === 'string' && m.length > 0);
+        if (!cancelled) {
+          const uniq = Array.from(new Set(mints)) as string[];
+          bagsMintsRef.current = uniq.slice(0, 200);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    run();
+    const id = setInterval(run, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // ── Listen for executed RWA stock trades and inject into live feed ──
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const anyEvt = event as any;
+      const detail = anyEvt?.detail as {
+        symbol?: string;
+        name?: string;
+        mint?: string;
+        side?: 'buy' | 'sell';
+        quoteAsset?: 'USDC' | 'SOL';
+        uiAmount?: number;
+        stockUnits?: number;
+        notionalUsd?: number;
+        price?: number | null;
+        walletAddress?: string;
+        externalUrl?: string;
+        imageUrl?: string | null;
+      } | undefined;
+
+      if (!detail || !detail.mint || !detail.side || !detail.uiAmount) return;
+
+      const nowIso = new Date().toISOString();
+      const sideIsBuy = detail.side === 'buy';
+      const notional = typeof detail.notionalUsd === 'number' && Number.isFinite(detail.notionalUsd)
+        ? detail.notionalUsd
+        : detail.uiAmount;
+
+      const shares = typeof detail.stockUnits === 'number' && Number.isFinite(detail.stockUnits)
+        ? detail.stockUnits
+        : detail.uiAmount;
+
+      const price = typeof detail.price === 'number' && Number.isFinite(detail.price)
+        ? detail.price
+        : notional > 0 && shares > 0
+          ? notional / shares
+          : 0;
+
+      const trade: TerminalTrade = {
+        id: `rwa-${detail.mint}-${Date.now()}`,
+        provider: 'RWA',
+        type: sideIsBuy ? 'BUY' : 'SELL',
+        marketId: detail.mint,
+        marketName: detail.name || detail.symbol || `${detail.symbol ?? 'RWA'} stock`,
+        side: sideIsBuy ? 'Yes' : 'No',
+        price,
+        priceCents: `${(price * 100).toFixed(1)}¢`,
+        shares,
+        notional,
+        fee: 0,
+        timestamp: nowIso,
+        walletAddress: detail.walletAddress,
+        isWhale: notional >= 2000,
+        externalUrl: detail.externalUrl || '/stocks',
+        slug: undefined,
+        category: 'RWAs',
+        imageUrl: detail.imageUrl || undefined,
+        outcomeIndex: undefined,
+        tokenId: detail.mint,
+      };
+
+      // Keep a dedicated RWA trade buffer (last 1h) so they persist
+      // across backend snapshot polls.
+      try {
+        const nowTs = Date.now();
+        const ONE_HOUR = 60 * 60 * 1000;
+        const existing = Array.isArray(rwaTradesRef.current) ? rwaTradesRef.current : [];
+        const filtered = existing.filter((t) => {
+          const ts = Date.parse(t.timestamp);
+          return !Number.isNaN(ts) && (nowTs - ts) <= ONE_HOUR;
+        });
+        rwaTradesRef.current = [trade, ...filtered].slice(0, 200);
+      } catch {
+        rwaTradesRef.current = [trade, ...(rwaTradesRef.current || [])].slice(0, 200);
+      }
+
+      setTrades(prev => [trade, ...prev].slice(0, 600));
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('rwa-trade-executed', handler as any);
+      return () => window.removeEventListener('rwa-trade-executed', handler as any);
+    }
+  }, []);
+
+  // ── Listen for executed Bags trades and inject into live feed ──
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const anyEvt = event as any;
+      const detail = anyEvt?.detail as {
+        mint?: string;
+        side?: 'buy' | 'sell';
+        quoteAsset?: 'USDC' | 'SOL';
+        uiAmount?: number;
+        timestamp?: string;
+      } | undefined;
+      if (!detail?.mint || !detail?.side || !detail?.uiAmount) return;
+
+      const nowIso = detail.timestamp || new Date().toISOString();
+      const sideIsBuy = detail.side === 'buy';
+      const notional = detail.uiAmount; // best-effort until we enrich with prices
+      const shares = detail.uiAmount;
+
+      const trade: TerminalTrade = {
+        id: `bags-${detail.mint}-${Date.now()}`,
+        provider: 'Bags',
+        type: sideIsBuy ? 'BUY' : 'SELL',
+        marketId: detail.mint,
+        marketName: 'Bags token',
+        side: sideIsBuy ? 'Yes' : 'No',
+        price: 0,
+        priceCents: `${(0).toFixed(1)}¢`,
+        shares,
+        notional,
+        fee: 0,
+        timestamp: nowIso,
+        isWhale: notional >= 2000,
+        externalUrl: '/bags',
+        category: 'Bags',
+        tokenId: detail.mint,
+      };
+
+      // Keep 1h buffer so they persist across backend polls.
+      try {
+        const nowTs = Date.now();
+        const ONE_HOUR = 60 * 60 * 1000;
+        const existing = Array.isArray(bagsTradesRef.current) ? bagsTradesRef.current : [];
+        const filtered = existing.filter((t) => {
+          const ts = Date.parse(t.timestamp);
+          return !Number.isNaN(ts) && (nowTs - ts) <= ONE_HOUR;
+        });
+        bagsTradesRef.current = [trade, ...filtered].slice(0, 300);
+      } catch {}
+
+      setTrades((prev) => [trade, ...prev].slice(0, 600));
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('bags-trade-executed', handler as any);
+      return () => window.removeEventListener('bags-trade-executed', handler as any);
+    }
+  }, []);
+
+  // ── Poll market-wide Bags trades (via GeckoTerminal trades on Bags mints) ──
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) return;
+      const mints = (bagsMintsRef.current || []).slice(0, 12);
+      if (!mints.length) return;
+
+      const nowTs = Date.now();
+      const ONE_HOUR = 60 * 60 * 1000;
+      const newlySeen: TerminalTrade[] = [];
+
+      for (const mint of mints) {
+        if (cancelled) break;
+        try {
+          const res = await fetch(
+            `/api/stocks/trades?mint=${encodeURIComponent(mint)}&limit=40`,
+            { cache: 'no-store' },
+          );
+          const json = await res.json();
+          if (!res.ok || !Array.isArray(json?.trades)) continue;
+
+          for (const r of json.trades as any[]) {
+            const ts = Date.parse(String(r?.time || ''));
+            if (Number.isNaN(ts) || nowTs - ts > ONE_HOUR) continue;
+            const tokenAmount = Number(r?.tokenAmount || 0);
+            const volumeUsd = Number(r?.volumeUsd || 0);
+            const priceUsd = Number(r?.priceUsd || 0);
+            if (!Number.isFinite(tokenAmount) || tokenAmount <= 0) continue;
+            if (!Number.isFinite(volumeUsd) || volumeUsd <= 0) continue;
+
+            const side = String(r?.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy';
+            const price = Number.isFinite(priceUsd) && priceUsd > 0 ? priceUsd : volumeUsd / tokenAmount;
+            newlySeen.push({
+              id: `bags-gt-${mint}-${String(r?.id || r?.txHash || ts)}`,
+              provider: 'Bags',
+              type: side === 'buy' ? 'BUY' : 'SELL',
+              marketId: mint,
+              marketName: 'Bags token',
+              side: side === 'buy' ? 'Yes' : 'No',
+              price,
+              priceCents: `${(price * 100).toFixed(1)}¢`,
+              shares: tokenAmount,
+              notional: volumeUsd,
+              fee: 0,
+              timestamp: new Date(ts).toISOString(),
+              walletAddress: String(r?.maker || ''),
+              isWhale: volumeUsd >= 2000,
+              externalUrl: '/bags',
+              category: 'Bags',
+              tokenId: mint,
+            });
+          }
+        } catch {
+          // ignore individual mint failures
+        }
+      }
+
+      if (!cancelled && newlySeen.length) {
+        const existing = Array.isArray(bagsTradesRef.current) ? bagsTradesRef.current : [];
+        const all = [...newlySeen, ...existing];
+        const byId = new Map<string, TerminalTrade>();
+        for (const t of all) {
+          const ts = Date.parse(t.timestamp);
+          if (Number.isNaN(ts) || nowTs - ts > ONE_HOUR) continue;
+          byId.set(t.id, t);
+        }
+        bagsTradesRef.current = Array.from(byId.values()).slice(0, 600);
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // ── Poll GeckoTerminal-backed RWA trades for top stocks and merge into feed ──
+  useEffect(() => {
+    if (!rwaStocks.length) return;
+    let cancelled = false;
+
+    const pollRwaMarketTrades = async () => {
+      if (cancelled) return;
+      // Limit to a reasonable number of mints per poll to avoid rate limits.
+      const top = rwaStocks
+        .filter((s) => s.mint)
+        .slice(0, 12);
+
+      const nowTs = Date.now();
+      const ONE_HOUR = 60 * 60 * 1000;
+
+      const newlySeen: TerminalTrade[] = [];
+
+      for (const stock of top) {
+        if (cancelled || !stock.mint) break;
+        try {
+          const res = await fetch(
+            `/api/stocks/trades?mint=${encodeURIComponent(stock.mint)}&limit=40`,
+            { cache: 'no-store' },
+          );
+          const json = await res.json();
+          if (!res.ok || !Array.isArray(json?.trades)) continue;
+
+          const rows = json.trades as {
+            id: string;
+            time: string;
+            side: 'buy' | 'sell';
+            priceUsd: number;
+            volumeUsd: number;
+            tokenAmount: number;
+            maker: string;
+            txHash: string;
+          }[];
+
+          for (const r of rows) {
+            const ts = Date.parse(r.time);
+            if (Number.isNaN(ts) || nowTs - ts > ONE_HOUR) continue;
+            const shares =
+              Number.isFinite(r.tokenAmount) && r.tokenAmount > 0 ? r.tokenAmount : 0;
+            const notional =
+              Number.isFinite(r.volumeUsd) && r.volumeUsd > 0 ? r.volumeUsd : 0;
+            const price =
+              Number.isFinite(r.priceUsd) && shares > 0
+                ? r.priceUsd
+                : notional > 0 && shares > 0
+                  ? notional / shares
+                  : 0;
+
+            if (!shares || !notional || !price) continue;
+
+            newlySeen.push({
+              id: `rwa-gt-${stock.mint}-${r.id}`,
+              provider: 'RWA',
+              type: r.side === 'buy' ? 'BUY' : 'SELL',
+              marketId: stock.mint,
+              marketName: stock.name || stock.symbol || `${stock.symbol} stock`,
+              side: r.side === 'buy' ? 'Yes' : 'No',
+              price,
+              priceCents: `${(price * 100).toFixed(1)}¢`,
+              shares,
+              notional,
+              fee: 0,
+              timestamp: new Date(ts).toISOString(),
+              walletAddress: r.maker,
+              isWhale: notional >= 2000,
+              externalUrl: '/stocks',
+              slug: undefined,
+              category: 'RWAs',
+              imageUrl: stock.icon,
+              outcomeIndex: undefined,
+              tokenId: stock.mint,
+            });
+          }
+        } catch {
+          // ignore individual mint failures
+        }
+      }
+
+      if (!cancelled && newlySeen.length) {
+        try {
+          const existing = Array.isArray(rwaTradesRef.current)
+            ? rwaTradesRef.current
+            : [];
+          const all = [...newlySeen, ...existing];
+          const byId = new Map<string, TerminalTrade>();
+          for (const t of all) {
+            if (!t || !t.id) continue;
+            const ts = Date.parse(t.timestamp);
+            if (Number.isNaN(ts) || nowTs - ts > ONE_HOUR) continue;
+            byId.set(t.id, t);
+          }
+          rwaTradesRef.current = Array.from(byId.values()).slice(0, 400);
+        } catch {
+          // best-effort only
+        }
+      }
+    };
+
+    pollRwaMarketTrades();
+    const id = setInterval(pollRwaMarketTrades, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [rwaStocks]);
 
   // ── Filtered live trades (advanced) ──
   const filteredTrades = useMemo(() => trades.filter(t => {
@@ -1055,6 +1657,12 @@ export default function TerminalPage() {
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col bg-[#050505] bg-grid-trading text-white font-[family-name:var(--font-inter)] overflow-hidden">
+      {/* RWA stock detail panel (Jupiter-style) */}
+      <AnimatePresence>
+        {selectedRwa && (
+          <RwaDetailPanel stock={selectedRwa} onClose={() => setSelectedRwa(null)} />
+        )}
+      </AnimatePresence>
 
       {/* ══════════════════════════════════════════════════════════════════════
           TUTORIAL SLIDESHOW OVERLAY
@@ -1447,6 +2055,28 @@ export default function TerminalPage() {
                     KALSHI
                   </button>
 
+                  <button
+                    onClick={() => setFilterProvider(filterProvider === 'RWA' ? 'all' : 'RWA')}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterProvider === 'RWA'
+                        ? 'bg-[#4FFFC8]/20 text-[#4FFFC8] border border-[#4FFFC8]/30'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    RWA
+                  </button>
+
+                  <button
+                    onClick={() => setFilterProvider(filterProvider === 'Bags' ? 'all' : 'Bags')}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterProvider === 'Bags'
+                        ? 'bg-white/[0.06] text-white border border-white/10'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    BAGS
+                  </button>
+
                   <div className="w-px h-5 bg-[#1A1A1A] mx-1" />
 
                   <button
@@ -1792,11 +2422,23 @@ export default function TerminalPage() {
                       <div className="flex items-center gap-2 flex-shrink-0 w-36">
                         {trade.provider === 'Kalshi' ? (
                           <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                            <span className="w-1 h-1 rounded-full bg-emerald-400" />KALSHI
+                            <span className="w-1 h-1 rounded-full bg-emerald-400" />
+                            KALSHI
+                          </span>
+                        ) : trade.provider === 'Polymarket' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-blue-400" />
+                            POLY
+                          </span>
+                        ) : trade.provider === 'RWA' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-[#4FFFC8]/15 text-[#4FFFC8] border border-[#4FFFC8]/30 flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-[#4FFFC8]" />
+                            RWA
                           </span>
                         ) : (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center gap-1">
-                            <span className="w-1 h-1 rounded-full bg-blue-400" />POLY
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-white/[0.06] text-white border border-white/10 flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-white" />
+                            BAGS
                           </span>
                         )}
                       </div>
@@ -2033,13 +2675,17 @@ export default function TerminalPage() {
 
                 {/* Provider filter */}
                 <div className="flex items-center gap-1 bg-white/[0.03] rounded-full p-1">
-                  {(['all', 'Polymarket', 'Kalshi'] as const).map((src) => (
+                  {(['all', 'Polymarket', 'Kalshi', 'RWA'] as const).map((src) => (
                     <button
                       key={src}
                       onClick={() => setScannerFilter(src)}
                       className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all ${
                         scannerFilter === src
-                          ? src === 'Kalshi' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
+                          ? src === 'Kalshi'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : src === 'Polymarket'
+                              ? 'bg-blue-500/20 text-blue-400'
+                              : 'bg-[#4FFFC8]/20 text-[#4FFFC8]'
                           : 'text-slate-500 hover:text-white'
                       }`}
                     >
@@ -2117,6 +2763,182 @@ export default function TerminalPage() {
               <div className="text-xs text-slate-600 mt-3 text-right">
                 Showing {filteredTicks.length} of {marketTicks.length} markets · Updates every 5s
               </div>
+
+              {/* RWA section */}
+              {scannerFilter === 'all' || scannerFilter === 'RWA' ? (
+                <div className="mt-8">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#4FFFC8]" />
+                    Tokenized RWAs (Jupiter / xStocks)
+                  </h3>
+                  <div className="border border-[#1A1A1A] rounded-xl overflow-hidden">
+                    <div className="grid grid-cols-12 gap-4 px-4 py-3 bg-white/[0.02] text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-[#1A1A1A]">
+                      <div className="col-span-2">Symbol</div>
+                      <div className="col-span-4">Underlying</div>
+                      <div className="col-span-2 text-right">Price</div>
+                      <div className="col-span-2 text-right">24h</div>
+                      <div className="col-span-2 text-right">Volume</div>
+                    </div>
+                    <div className="max-h-[40vh] overflow-y-auto">
+                      {rwaStocks
+                        .filter((t) =>
+                          scannerSearch
+                            ? t.name.toLowerCase().includes(scannerSearch.toLowerCase()) ||
+                              t.underlying.toLowerCase().includes(scannerSearch.toLowerCase())
+                            : true
+                        )
+                        .map((t) => {
+                          const change = t.stats?.priceChange24h;
+                          const vol = t.stats?.volume24h;
+                          const changeClass =
+                            change == null
+                              ? 'text-slate-500'
+                              : change >= 0
+                                ? 'text-[#4FFFC8]'
+                                : 'text-red-400';
+                          return (
+                            <button
+                              type="button"
+                              key={t.symbol + t.mint}
+                              onClick={() => setSelectedRwa(t)}
+                              className="grid grid-cols-12 gap-4 px-4 py-3 border-b border-[#1A1A1A]/50 hover:bg-white/[0.02] transition-colors text-sm w-full text-left"
+                            >
+                              <div className="col-span-2 text-white font-mono">{t.symbol}</div>
+                              <div className="col-span-4 text-slate-300 truncate">
+                                {t.name} <span className="text-slate-500 text-[11px]">({t.underlying})</span>
+                              </div>
+                              <div className="col-span-2 text-right font-mono text-white">
+                                {t.price ? `$${t.price.toFixed(2)}` : '—'}
+                              </div>
+                              <div className={`col-span-2 text-right font-mono ${changeClass}`}>
+                                {change == null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}
+                              </div>
+                              <div className="col-span-2 text-right font-mono text-slate-300">
+                                {vol ? `$${(vol || 0).toFixed(0)}` : '—'}
+                              </div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </motion.div>
+          )}
+
+          {/* ════════════════════════════════════════════════════════════════════
+              POSITIONS TAB (Jupiter Prediction)
+              ════════════════════════════════════════════════════════════════════ */}
+          {activeTab === 'positions' && (
+            <motion.div
+              key="positions"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Briefcase className="w-5 h-5 text-[#4FFFC8]" />
+                    Positions
+                    <span className="text-xs font-normal text-slate-500">Jupiter</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Close positions or claim payouts (unsigned tx → wallet signs).
+                  </p>
+                </div>
+                <button
+                  onClick={loadJupPositions}
+                  className="px-3 py-2 rounded-full border border-white/10 bg-white/[0.03] text-xs text-slate-300 hover:text-white hover:border-white/20 transition-colors"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {!walletConnected || !publicKey ? (
+                <div className="text-center py-20 border border-[#1A1A1A] rounded-xl bg-white/[0.02]">
+                  <Users className="w-8 h-8 mx-auto mb-3 text-slate-600" />
+                  <p className="text-slate-300 text-sm">Connect your wallet to view positions</p>
+                  <p className="text-xs text-slate-600 mt-1">Phantom or Solflare required to sign.</p>
+                </div>
+              ) : jupPositionsLoading ? (
+                <div className="flex items-center justify-center py-24">
+                  <div className="flex items-center gap-3 text-slate-400">
+                    <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin border-[#4FFFC8]" />
+                    Loading positions…
+                  </div>
+                </div>
+              ) : !jupPositions?.length ? (
+                <div className="text-center py-20 border border-[#1A1A1A] rounded-xl bg-white/[0.02]">
+                  <Briefcase className="w-8 h-8 mx-auto mb-3 text-slate-600" />
+                  <p className="text-slate-300 text-sm">No open positions</p>
+                  <p className="text-xs text-slate-600 mt-1">Place a trade from the orderboard to get started.</p>
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {jupPositions.map((p: any) => {
+                    const claimable = p?.claimable === true && p?.claimed === false;
+                    const contracts = p?.contracts ? Number(p.contracts) : 0;
+                    const title = p?.marketMetadata?.title || p?.marketId || p?.marketMetadata?.marketId || 'Position';
+                    const side = p?.isYes ? 'YES' : 'NO';
+                    const pnlPct = typeof p?.pnlUsdPercent === 'number' ? p.pnlUsdPercent : null;
+                    const pnlColor =
+                      pnlPct == null ? 'text-slate-500' : pnlPct >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                    return (
+                      <div
+                        key={p.pubkey}
+                        className="p-4 rounded-xl border border-[#1A1A1A] bg-white/[0.02] hover:bg-white/[0.03] transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-white truncate">{title}</div>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 font-mono">
+                              <span className={`px-2 py-0.5 rounded-full border ${
+                                side === 'YES'
+                                  ? 'border-[#4FFFC8]/30 bg-[#4FFFC8]/10 text-[#4FFFC8]'
+                                  : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                              }`}>
+                                {side}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/[0.03] text-slate-300">
+                                {contracts.toLocaleString()} contracts
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full border border-white/10 bg-white/[0.03] ${pnlColor}`}>
+                                {pnlPct == null ? 'PNL —' : `PNL ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%`}
+                              </span>
+                              {claimable && (
+                                <span className="px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300">
+                                  Claimable
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {claimable && (
+                              <button
+                                onClick={() => handleClaimJupPosition(p.pubkey)}
+                                disabled={jupActionBusy === p.pubkey}
+                                className="px-3 py-2 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-200 text-xs font-semibold hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                              >
+                                {jupActionBusy === p.pubkey ? 'Claiming…' : 'Claim payout'}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleCloseJupPosition(p.pubkey)}
+                              disabled={jupActionBusy === p.pubkey}
+                              className="px-3 py-2 rounded-full bg-white/[0.03] border border-white/10 text-slate-200 text-xs font-semibold hover:border-[#4FFFC8]/30 hover:bg-[#4FFFC8]/5 transition-colors disabled:opacity-50"
+                            >
+                              {jupActionBusy === p.pubkey ? 'Closing…' : 'Close'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </motion.div>
           )}
 

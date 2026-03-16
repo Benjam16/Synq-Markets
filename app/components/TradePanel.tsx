@@ -7,6 +7,9 @@ import { Market } from '@/lib/types';
 import { useAuth } from './AuthProvider';
 import dynamic from 'next/dynamic';
 import { toast } from 'react-hot-toast';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { Connection, VersionedTransaction, clusterApiUrl } from '@solana/web3.js';
+import { Buffer } from 'buffer';
 
 // Lazy load heavy chart component
 const LineChart = dynamic(() => import('recharts').then(mod => ({ default: mod.LineChart })), { ssr: false });
@@ -43,11 +46,18 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [userPositions, setUserPositions] = useState<any[]>([]); // User's open positions for this market
   const [tradeStatus, setTradeStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle'); // Optimistic trade state
-  const [stopLossEnabled, setStopLossEnabled] = useState(false);
-  const [stopLossCents, setStopLossCents] = useState<string>('');
+  // Stop-loss is not supported in Jupiter execution mode.
   const { user } = useAuth();
+  const { publicKey, connected, signTransaction } = useWallet();
   const dataInitializedRef = useRef(false); // Track if initial data has been loaded
   const lastUpdateTimeRef = useRef<number>(0); // Track last update timestamp
+
+  const rpcUrl = useMemo(() => process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl('mainnet-beta'), []);
+  const connection = useMemo(() => new Connection(rpcUrl, { commitment: 'confirmed' }), [rpcUrl]);
+
+  const JUPUSD_MINT = 'JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD';
+  const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const [depositMint, setDepositMint] = useState<'JUPUSD' | 'USDC'>('USDC');
 
   // Set default selected market when panel opens
   useEffect(() => {
@@ -363,237 +373,98 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
       // This ensures "Buy No" on a candidate trades "No" on that candidate, not a generic "No" outcome
       const side = tradeSide;
 
-      // Call buy or sell API based on tradeType
-      const apiEndpoint = tradeType === 'sell' ? '/api/sell' : '/api/buy';
-      const provLower = (selectedMarket.provider || 'polymarket').toLowerCase();
+      // REAL EXECUTION (Jupiter Prediction): buy only for now
+      if (!connected || !publicKey) {
+        setTradeStatus('error');
+        toast.error('Wallet not connected (Phantom/Solflare)');
+        setTimeout(() => setTradeStatus('idle'), 2000);
+        return;
+      }
+      if (typeof signTransaction !== 'function') {
+        setTradeStatus('error');
+        toast.error('Wallet cannot sign transactions');
+        setTimeout(() => setTradeStatus('idle'), 2000);
+        return;
+      }
+      if (tradeType !== 'buy') {
+        setTradeStatus('idle');
+        toast('Close-outs are managed from the Positions tab.', {
+          icon: '📊',
+        });
+        // Ask terminal to switch to Positions view
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('open-positions-tab'));
+        }
+        onClose();
+        return;
+      }
 
-      // For Polymarket, ALWAYS use conditionId (Gamma APIs expect condition_id).
-      // For Kalshi, id is usually \"kalshi-{eventTicker}\" while conditionId is event_ticker;
-      // both are understood by getMarketPriceFast via fetchAllMarkets() matching.
-      const marketIdForTrade =
-        provLower === 'polymarket'
-          ? (selectedMarket.conditionId || selectedMarket.id)
-          : (selectedMarket.id || selectedMarket.conditionId);
+      const jupMarketId =
+        (selectedMarket as any)?.jupMarketId ||
+        selectedMarket.slug ||
+        selectedMarket.conditionId ||
+        selectedMarket.id;
+      if (!jupMarketId) {
+        setTradeStatus('error');
+        toast.error('This market is missing a Jupiter market id');
+        setTimeout(() => setTradeStatus('idle'), 2000);
+        return;
+      }
 
-      // Build external URL: Kalshi uses series_ticker only, Polymarket uses event slug
-      const extUrl = provLower === 'kalshi'
-        ? ((selectedMarket as any).kalshiUrl || (() => {
-            const slug = (selectedMarket.slug || selectedMarket.conditionId || '').toLowerCase();
-            const seriesPart = slug.split('-')[0];
-            return `https://kalshi.com/markets/${seriesPart}`;
-          })())
-        : ((selectedMarket as any).polymarketUrl || (selectedMarket.slug ? `https://polymarket.com/event/${selectedMarket.slug}` : ''));
+      // depositAmount is in micro USD units (1e6 = $1.00)
+      const depositAmountMicro = Math.max(1, Math.ceil(cost * 1_000_000));
+      const mint = depositMint === 'JUPUSD' ? JUPUSD_MINT : USDC_MINT;
 
-      // Pass the outcome's token_id for Polymarket price cache lookups
-      const outcomeTokenId = currentOutcome?.tokenId || undefined;
-
-      const res = await fetch(apiEndpoint, {
+      const orderResp = await fetch('/api/jup/prediction/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          wallet,
-          marketId: marketIdForTrade,
-          provider: provLower,
-          side: side,
-          outcome: currentOutcome.name,
-          currentOutcome: currentOutcome,
-          price: currentPrice,
-          quantity: Number(quantity),
-          marketName: selectedMarket.eventTitle || selectedMarket.name || displayTitle,
-          category: selectedMarket.category || 'General',
-          externalUrl: extUrl || undefined,
-          tokenId: outcomeTokenId,
-          ...(tradeType === 'buy' && stopLossEnabled && Number(stopLossCents) > 0
-            ? { stopLossCents: Number(stopLossCents) }
-            : {}),
+          ownerPubkey: publicKey.toBase58(),
+          depositAmount: String(depositAmountMicro),
+          depositMint: mint,
+          marketId: String(jupMarketId),
+          isYes: side === 'yes',
+          isBuy: true,
         }),
+      }).then((r) => r.json());
+
+      if (orderResp?.error) {
+        setTradeStatus('error');
+        toast.error(orderResp.error);
+        setTimeout(() => setTradeStatus('idle'), 2000);
+        return;
+      }
+
+      const txB64: string | undefined = orderResp?.transaction;
+      if (!txB64) {
+        setTradeStatus('error');
+        toast.error('Jupiter did not return a transaction');
+        setTimeout(() => setTradeStatus('idle'), 2000);
+        return;
+      }
+
+      const tx = VersionedTransaction.deserialize(Buffer.from(txB64, 'base64'));
+      const signed = await signTransaction(tx);
+
+      const latest = await connection.getLatestBlockhash({ commitment: 'confirmed' });
+      const sig = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: true,
+        maxRetries: 2,
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        
-        // Check if there's an error in the response
-        if (data.error) {
-          setTradeStatus('error');
-          toast.error(data.error, {
-            style: {
-              background: '#ef4444',
-              color: '#ffffff',
-              border: '1px solid #dc2626',
-            },
-          });
-          // Reset to idle after error
-          setTimeout(() => setTradeStatus('idle'), 2000);
-          return;
-        }
-        
-        // OPTIMISTIC UPDATE: Show success state immediately
-        setTradeStatus('success');
-        
-        // Log successful trade
-        console.log('[TradePanel] Trade successful:', data);
-        
-        // Optimistically update positions (don't wait for API)
-        if (tradeType === 'buy') {
-          // Add new position optimistically
-          const newPosition = {
-            id: data.trade?.id || Date.now(),
-            marketId: marketIdForTrade,
-            provider: (selectedMarket.provider || 'polymarket').toLowerCase(),
-            side: side,
-            price: currentPrice,
-            quantity: Number(quantity),
-            executedAt: new Date().toISOString(),
-          };
-          setUserPositions(prev => [...(prev || []), newPosition]);
-        } else {
-          // Remove/update sold positions optimistically
-          setUserPositions(prev => {
-            if (!prev) return [];
-            let remaining = Number(quantity);
-            return prev.filter(pos => {
-              if (pos.marketId === marketIdForTrade && remaining > 0) {
-                const posQty = Number(pos.quantity || 0);
-                if (posQty <= remaining) {
-                  remaining -= posQty;
-                  return false; // Remove this position
-                } else {
-                  remaining = 0;
-                  return true; // Keep but quantity will be updated by next refresh
-                }
-              }
-              return true;
-            });
-          });
-        }
-        
-        // Refresh positions in background (non-blocking)
-        fetch(`/api/positions?wallet=${encodeURIComponent(wallet)}&marketId=${selectedMarket.id || selectedMarket.conditionId}`)
-          .then(res => res.ok ? res.json() : null)
-          .then(posData => {
-            if (posData?.positions) {
-              setUserPositions(posData.positions);
-            }
-          })
-          .catch(() => {}); // Silently fail - optimistic update already applied
-        
-        // Trigger dashboard refresh by dispatching custom event (non-blocking)
-        window.dispatchEvent(new CustomEvent('trade-executed', { detail: data }));
-        
-        const action = tradeType === 'sell' ? 'Sold' : 'Bought';
-        const pnlInfo = tradeType === 'sell' && data.pnl ? ` (PnL: ${data.pnl >= 0 ? '+' : ''}$${data.pnl.toFixed(2)})` : '';
-        toast.success(`${action}: ${currentOutcome?.name.toUpperCase()} ${selectedMarket.name}${pnlInfo}`, {
-          duration: 3000,
-          style: {
-            background: tradeType === 'sell' ? '#ef4444' : '#10b981',
-            color: '#ffffff',
-          },
-        });
-        
-        // Keep success state visible for 1 second before closing
-        setTimeout(() => {
-          setTradeStatus('idle');
-          onClose();
-          // Call the onTrade callback for any additional handling
-          if (onTrade && selectedMarket) {
-            onTrade(selectedMarket, tradeSide, Number(quantity));
-          }
-        }, 1000);
-      } else {
-        setTradeStatus('error');
-        let errorMessage = `Failed to ${tradeType}`;
-        try {
-          // Try to get error message from response
-          const text = await res.text();
-          if (text) {
-            try {
-              const error = JSON.parse(text);
-              errorMessage = error.error || error.message || error.details || errorMessage;
-              
-              // Check for specific error types and provide helpful messages
-              const errorLower = errorMessage.toLowerCase();
-              if (errorLower.includes('circuit breaker') || errorLower.includes('too many authentication')) {
-                errorMessage = 'Authentication rate limit exceeded. Please wait a few minutes and try again. If this persists, check your Supabase credentials.';
-              } else if (errorLower.includes('authentication') || errorLower.includes('unauthorized')) {
-                errorMessage = 'Authentication error. Please refresh the page and try again.';
-              } else if (errorLower.includes('no active challenge') || errorLower.includes('subscription')) {
-                errorMessage = 'You need an active challenge subscription to trade. Please purchase a challenge first.';
-              } else if (errorLower.includes('insufficient') || errorLower.includes('balance')) {
-                errorMessage = 'Insufficient balance. Please check your account balance.';
-              }
-              
-              // Only log if error object has meaningful content
-              if (Object.keys(error).length > 0) {
-                console.error('Trade API error:', {
-                  status: res.status,
-                  statusText: res.statusText,
-                  error: error,
-                  body: text,
-                });
-              } else {
-                // If error object is empty, log the raw response
-                console.error('Trade API error (empty error object):', {
-                  status: res.status,
-                  statusText: res.statusText,
-                  body: text,
-                  errorMessage: errorMessage,
-                });
-              }
-            } catch {
-              // If not JSON, use the text as error message
-              errorMessage = text.length > 100 ? `Failed to ${tradeType} (HTTP ${res.status})` : text;
-              console.error('Trade API error (non-JSON):', {
-                status: res.status,
-                statusText: res.statusText,
-                body: text,
-              });
-            }
-          } else {
-            errorMessage = `Failed to ${tradeType} (HTTP ${res.status} ${res.statusText})`;
-            console.error('Trade API error (empty response):', {
-              status: res.status,
-              statusText: res.statusText,
-            });
-          }
-        } catch (parseError: any) {
-          console.error('Failed to parse error response:', parseError);
-          errorMessage = `Failed to ${tradeType} (HTTP ${res.status})`;
-        }
-        toast.error(errorMessage, {
-          duration: 5000,
-          style: {
-            background: '#ef4444',
-            color: '#ffffff',
-            border: '1px solid #dc2626',
-          },
-        });
-        // Reset to idle after error
-        setTimeout(() => setTradeStatus('idle'), 2000);
-      }
+      await connection.confirmTransaction(
+        { signature: sig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
+        'confirmed'
+      );
+
+      setTradeStatus('success');
+      toast.success(`Order sent: ${sig.slice(0, 4)}…${sig.slice(-4)}`);
+      setTimeout(() => setTradeStatus('idle'), 2000);
+      return;
     } catch (error: any) {
       setTradeStatus('error');
-      console.error('Trade failed:', error);
-      let errorMessage = error?.message || 'Failed to execute trade';
-      
-      // Check for specific error types in network errors
-      const errorLower = errorMessage.toLowerCase();
-      if (errorLower.includes('circuit breaker') || errorLower.includes('too many authentication')) {
-        errorMessage = 'Authentication rate limit exceeded. Please wait a few minutes and try again. If this persists, check your Supabase credentials.';
-      } else if (errorLower.includes('network') || errorLower.includes('fetch')) {
-        errorMessage = 'Network error. Please check your connection and try again.';
-      } else if (error?.name === 'AbortError') {
-        errorMessage = 'Request was cancelled. Please try again.';
-      }
-      
-      toast.error(errorMessage, {
-        duration: 5000,
-        style: {
-          background: '#ef4444',
-          color: '#ffffff',
-          border: '1px solid #dc2626',
-        },
-      });
-      // Reset to idle after error
+      console.error('Jupiter trade failed:', error);
+      toast.error(error?.message || 'Failed to execute Jupiter trade');
       setTimeout(() => setTradeStatus('idle'), 2000);
     }
   };
@@ -1030,6 +901,37 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                       </button>
                     </div>
 
+                    {/* Execution (Jupiter Prediction) */}
+                    <div className="mb-4 p-3 bg-slate-950/50 backdrop-blur-md border border-white/5 rounded-lg">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500 font-semibold">
+                          Execution
+                        </div>
+                        <span className="text-[10px] uppercase tracking-[0.16em] text-[#4FFFC8] font-semibold border border-[#4FFFC8]/30 bg-[#4FFFC8]/10 px-2 py-0.5 rounded-full">
+                          Real (Jupiter)
+                        </span>
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+                        <div className="text-xs text-slate-500">
+                          Requires wallet signature (Phantom/Solflare). Buy orders here; sell/claim in Positions.
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase tracking-[0.16em] text-slate-500 font-semibold">
+                            Deposit
+                          </span>
+                          <select
+                            value={depositMint}
+                            onChange={(e) => setDepositMint(e.target.value as any)}
+                            className="h-8 px-3 rounded-full bg-black/40 border border-white/10 text-xs text-slate-200 focus:outline-none focus:border-[#4FFFC8]/40"
+                          >
+                            <option value="USDC">USDC</option>
+                            <option value="JUPUSD">JupUSD</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Show available positions when selling */}
                     {tradeType === 'sell' && userPositions.length > 0 && (
                       <div className="mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
@@ -1246,53 +1148,7 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
                         </div>
                       </div>
 
-                      {/* ── Stop Loss ── */}
-                      {tradeType === 'buy' && (
-                        <div className="p-4 bg-slate-950/50 backdrop-blur-md border border-white/5 rounded-lg">
-                          <div className="flex items-center justify-between mb-2">
-                            <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                              <span className="text-amber-400">🛡</span>
-                              Stop Loss
-                              <span className="text-[10px] text-slate-500 font-normal">optional</span>
-                            </label>
-                            {/* Toggle */}
-                            <button
-                              type="button"
-                              onClick={() => setStopLossEnabled(!stopLossEnabled)}
-                              className={`relative inline-flex items-center h-5 w-9 rounded-full transition-colors focus:outline-none ${
-                                stopLossEnabled ? 'bg-amber-400/80' : 'bg-slate-700'
-                              }`}
-                            >
-                              <span className={`inline-block w-3.5 h-3.5 rounded-full bg-white transform transition-transform shadow-sm ${
-                                stopLossEnabled ? 'translate-x-[18px]' : 'translate-x-[2px]'
-                              }`} />
-                            </button>
-                          </div>
-                          {stopLossEnabled && (
-                            <div className="mt-2 space-y-2">
-                              <p className="text-xs text-slate-500">Auto-sell if price drops to or below:</p>
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="number"
-                                  value={stopLossCents}
-                                  onChange={(e) => setStopLossCents(e.target.value)}
-                                  min="1"
-                                  max="99"
-                                  step="1"
-                                  placeholder={`e.g. ${Math.max(1, Math.floor((currentPrice * 100) * 0.8))}`}
-                                  className="flex-1 px-3 py-2 bg-slate-900 border border-amber-400/20 rounded-lg text-white text-sm font-mono focus:outline-none focus:border-amber-400/50"
-                                />
-                                <span className="text-sm text-slate-400 font-mono">¢</span>
-                              </div>
-                              {Number(stopLossCents) > 0 && currentPrice > 0 && (
-                                <p className="text-xs text-amber-400/70">
-                                  Current: {(currentPrice * 100).toFixed(0)}¢ · Max loss: ~${Math.max(0, (currentPrice - Number(stopLossCents) / 100) * Number(quantity || 0)).toFixed(2)}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      {/* Stop loss removed for Jupiter execution */}
 
                       {parlayMode ? (
                         <div className="w-full p-4 rounded-lg border border-violet-500/30 bg-violet-500/10 text-center">

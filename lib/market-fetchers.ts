@@ -13,6 +13,8 @@ export interface UnifiedMarket {
   id: string;
   conditionId: string;
   provider: 'Kalshi' | 'Polymarket';
+  /** Jupiter Prediction API compatible market identifier (slug/event_ticker). */
+  jupMarketId?: string;
   name: string;
   eventTitle?: string; // Rich display title (may include subtitle)
   description: string;
@@ -737,6 +739,7 @@ export async function fetchPolymarketMarkets(limit: number = 10000): Promise<Uni
         outcomes: allIndexedOutcomes, // ALL choices (2 or 20) are now here
         imageUrl: event.image || event.icon || "https://polymarket.com/favicon.ico",
         slug: event.slug,
+        jupMarketId: event.slug,
         polymarketUrl: `https://polymarket.com/event/${event.slug}`,
         volume: totalVolume,
         volumeFormatted: formattedVol,
@@ -1380,6 +1383,7 @@ export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
             polymarketUrl: `https://kalshi.com/markets/${kalshiSlug}`,
             kalshiUrl: `https://kalshi.com/markets/${kalshiSlug}`,
             slug: event.event_ticker.toLowerCase(),
+            jupMarketId: event.event_ticker,
             volume: totalVol,
             volumeFormatted: formatVolume(totalVol),
             category: 'Fast Markets',

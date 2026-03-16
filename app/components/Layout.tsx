@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Briefcase, AlertTriangle, TrendingUp, LogOut, Home, Menu, X, User, Trophy, Archive, BarChart3, Shield, Target, Monitor } from "lucide-react";
+import { LayoutDashboard, Briefcase, AlertTriangle, TrendingUp, LogOut, Home, Menu, X, User, Trophy, Archive, BarChart3, Shield, Target, Monitor, Layers, Package, BookOpen } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import { useState, useEffect, useCallback } from "react";
 import { NotificationCenter } from "./NotificationCenter";
@@ -29,6 +29,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       // Prefetch heavy page bundles in background
       router.prefetch('/markets');
       router.prefetch('/terminal');
+      router.prefetch('/stocks');
     }, 1500);
     return () => clearTimeout(prefetchTimer);
   }, [router]);
@@ -51,8 +52,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // Nav item type: icon must accept SVG props so we can pass className/strokeWidth
   type NavItem = { href: string; label: string; icon: React.ComponentType<React.SVGProps<SVGSVGElement>>; isAdmin?: boolean };
   const primaryNavItems: NavItem[] = [
-    { href: "/markets", label: "Markets", icon: BarChart3 },
+    { href: "/markets", label: "Predictions", icon: BarChart3 },
     { href: "/terminal", label: "Terminal", icon: Monitor },
+    { href: "/stocks", label: "RWAs", icon: Layers },
+    { href: "/bags", label: "Bags", icon: Package },
+    { href: "/docs", label: "Docs", icon: BookOpen },
     { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
   ];
   const secondaryNavItems: NavItem[] = [];
