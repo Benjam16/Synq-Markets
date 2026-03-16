@@ -24,12 +24,14 @@ export async function GET(_req: NextRequest, context: any) {
       return NextResponse.json({ error: 'Stock not found' }, { status: 404 });
     }
 
-    const [priceData, tokensV2Data] = await Promise.all([
+    const [priceData, tokensV2Raw] = await Promise.all([
       fetchPriceV2([mint], apiKey),
       apiKey
         ? fetchTokensV2([mint], apiKey)
         : Promise.resolve({}),
     ]);
+
+    const tokensV2Data = tokensV2Raw as Record<string, any>;
 
     const stock = enrichStock(config, priceData[mint], tokensV2Data[mint]);
     return NextResponse.json(stock);
