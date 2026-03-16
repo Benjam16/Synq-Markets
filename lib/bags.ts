@@ -175,7 +175,7 @@ export async function getBagsPriceUsd(
     const outAmountStr = quote?.outAmount;
     if (!outAmountStr) return null;
     const outAmount = BigInt(outAmountStr);
-    if (outAmount <= 0n) return null;
+    if (outAmount <= BigInt(0)) return null;
     const decimals = Number.isFinite(tokenDecimals) ? tokenDecimals : 6;
     // Convert to Number safely for display-only pricing. For huge outAmount values,
     // precision may be limited, but this is sufficient for a screener price.
