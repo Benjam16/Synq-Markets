@@ -24,6 +24,8 @@ type BagsTokenRow = {
   marketCapUsd?: number | null;
   priceChange24h?: number;
   source?: 'feed' | 'pools';
+  status?: 'PRE_LAUNCH' | 'PRE_GRAD' | 'MIGRATING' | 'MIGRATED';
+  migrated?: boolean;
 };
 
 // Simple in-memory cache to avoid hammering GeckoTerminal and Bags quote API.
@@ -64,12 +66,18 @@ export async function GET(req: NextRequest) {
         name: String(i.name || ''),
         symbol: String(i.symbol || ''),
         image: String(i.image || ''),
+        status: (i as any)?.status as BagsTokenRow['status'] | undefined,
       }))
       .filter((i) => i.mint && i.mint.length > 0);
 
-    const poolsMints = (pools || [])
-      .map((p) => normalizeBagsMint(String((p as any)?.tokenMint || '')))
-      .filter((m) => m && m.length > 0);
+    const poolsNorm = (pools || []).map((p: any) => ({
+      mint: normalizeBagsMint(String(p?.tokenMint || '')),
+      migrated: Boolean(p?.dammV2PoolKey),
+    }));
+    const poolsMints = poolsNorm.map((p) => p.mint).filter((m) => m && m.length > 0);
+    const migratedMintSet = new Set(
+      poolsNorm.filter((p) => p.migrated).map((p) => p.mint),
+    );
 
     // Universe: feed first (most relevant), then pools. Cap at 80 for fast first load.
     const universe = Array.from(
@@ -80,9 +88,9 @@ export async function GET(req: NextRequest) {
     const gtStats = await fetchGeckoStatsForMints(universe);
 
     // 2) Pull name/symbol/image from Bags token launch feed when available (single call).
-    const feedMap = new Map<string, { name: string; symbol: string; image: string }>();
+    const feedMap = new Map<string, { name: string; symbol: string; image: string; status?: BagsTokenRow['status'] }>();
     for (const item of feedItems) {
-      feedMap.set(item.mint, { name: item.name, symbol: item.symbol, image: item.image });
+      feedMap.set(item.mint, { name: item.name, symbol: item.symbol, image: item.image, status: item.status });
     }
     const feedMintSet = new Set(feedItems.map((i) => i.mint));
 
@@ -108,6 +116,8 @@ export async function GET(req: NextRequest) {
       const symbol = f?.symbol || md?.symbol || null;
       const imageUrl = f?.image || md?.image || null;
       const priceUsd = s.priceUsd;
+      const status = f?.status;
+      const migrated = Boolean(migratedMintSet.has(mint) || status === 'MIGRATED');
       return {
         mint,
         name,
@@ -120,19 +130,22 @@ export async function GET(req: NextRequest) {
         marketCapUsd: s.marketCapUsd ?? null,
         priceChange24h: s.priceChange24h,
         source: feedMintSet.has(mint) ? 'feed' : 'pools',
+        status,
+        migrated,
       };
     });
 
-    // Keep tokens with a real price AND non-zero 24h volume (traded in the past 24h),
+    // Keep tokens with a real price AND (non-zero 24h volume OR migrated/graduated),
     // prefer those with 24h change, sort by absolute 24h move.
     const ranked = rows
       .filter(
         (r) =>
           typeof r.priceUsd === 'number' &&
           Number.isFinite(r.priceUsd) &&
-          typeof r.volume24hUsd === 'number' &&
-          Number.isFinite(r.volume24hUsd) &&
-          r.volume24hUsd > 0,
+          ((typeof r.volume24hUsd === 'number' &&
+            Number.isFinite(r.volume24hUsd) &&
+            r.volume24hUsd > 0) ||
+            r.migrated === true),
       )
       .sort((a, b) => {
         const aHasChange =

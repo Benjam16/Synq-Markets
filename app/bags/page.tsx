@@ -15,6 +15,8 @@ type BagsTokenRow = {
   fdvUsd?: number;
   marketCapUsd?: number | null;
   priceChange24h?: number;
+  migrated?: boolean;
+  status?: 'PRE_LAUNCH' | 'PRE_GRAD' | 'MIGRATING' | 'MIGRATED';
 };
 
 const formatUSD = (v: number | undefined | null) =>
@@ -128,7 +130,7 @@ export default function BagsPage() {
         </div>
 
         <div className="mb-4 text-[11px] text-slate-500">
-          Showing **Bags tokens with trading volume in the last 24 hours** (sorted by 24h % move).
+          Showing **Bags tokens with 24h trading volume** plus **migrated/graduated** tokens (sorted by 24h % move when available).
         </div>
 
         <div className="rounded-xl border border-[#1A1A1A] overflow-hidden bg-white/[0.02]">
@@ -181,6 +183,7 @@ export default function BagsPage() {
                     const symbol = p?.symbol || t.symbol || '—';
                     const name = p?.name || t.name || 'Unknown token';
                     const img = p?.imageUrl || t.imageUrl || null;
+                    const migrated = t.migrated === true || t.status === 'MIGRATED';
                     const mcap = t.marketCapUsd ?? null;
                     const fdv = t.fdvUsd ?? undefined;
                     const pc24 = t.priceChange24h ?? undefined;
@@ -205,7 +208,14 @@ export default function BagsPage() {
                             <div className="w-7 h-7 rounded-full bg-white/[0.03] border border-[#1A1A1A]" />
                           )}
                           <div className="min-w-0">
-                            <div className="font-mono font-semibold text-white text-xs">{symbol}</div>
+                            <div className="flex items-center gap-2">
+                              <div className="font-mono font-semibold text-white text-xs">{symbol}</div>
+                              {migrated ? (
+                                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md border border-white/10 bg-white/[0.03] text-slate-300">
+                                  MIGRATED
+                                </span>
+                              ) : null}
+                            </div>
                             <div className="text-xs text-slate-500 truncate max-w-[260px]">{name}</div>
                           </div>
                         </div>
