@@ -459,6 +459,13 @@ export default function TradePanel({ market, eventMarkets, eventTitle, isOpen, o
 
       setTradeStatus('success');
       toast.success(`Order sent: ${sig.slice(0, 4)}…${sig.slice(-4)}`);
+      if (selectedMarket) {
+        try {
+          onTrade(selectedMarket, tradeSide, Number(quantity) || 0);
+        } catch {
+          /* parent hook optional */
+        }
+      }
       setTimeout(() => setTradeStatus('idle'), 2000);
       return;
     } catch (error: any) {

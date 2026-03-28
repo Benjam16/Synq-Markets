@@ -130,6 +130,37 @@ const normalizeName = (name: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+/** YES/NO probability range (¢) and order-book filters apply only to prediction venues. */
+const isPredictionMarketTrade = (t: TerminalTrade) =>
+  t.provider === 'Polymarket' || t.provider === 'Kalshi';
+
+const USDC_MINT_PREDICTION = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const MARKETS_INDEX_TTL_MS = 120_000;
+
+/** Match terminal / whale feed rows to hydrated markets for Jupiter Prediction `marketId`. */
+function findMarketForJupiterTrade(trade: TerminalTrade | WhaleAlert, markets: Market[]): Market | null {
+  const provider = (trade as TerminalTrade).provider;
+  if (provider !== 'Polymarket' && provider !== 'Kalshi') return null;
+  const raw = String(trade.marketId || '').trim();
+  if (!raw) return null;
+  const tid = raw.toLowerCase();
+
+  for (const m of markets) {
+    if (provider === 'Kalshi' && m.provider !== 'Kalshi') continue;
+    if (provider === 'Polymarket' && m.provider !== 'Polymarket') continue;
+
+    const parts = [(m as any).jupMarketId, m.conditionId, m.id, m.slug]
+      .filter(Boolean)
+      .map((s) => String(s).toLowerCase());
+
+    for (const p of parts) {
+      if (!p) continue;
+      if (p === tid || tid.includes(p) || p.includes(tid)) return m;
+    }
+  }
+  return null;
+}
+
 interface WalletProfile {
   address: string;
   totalPnl: number;
@@ -285,6 +316,7 @@ export default function TerminalPage() {
   const bagsMintsRef = useRef<string[]>([]);
   const bagsTradesRef = useRef<TerminalTrade[]>([]);
   const pumpTradesRef = useRef<TerminalTrade[]>([]);
+  const marketsIndexRef = useRef<{ loadedAt: number; markets: Market[] } | null>(null);
 
   // Keep pause ref in sync for use inside polling closure
   feedPausedRef.current = feedPaused;
@@ -484,6 +516,17 @@ export default function TerminalPage() {
     return wallet;
   }, [user]);
 
+  const loadMarketsIndex = useCallback(async (): Promise<Market[]> => {
+    const now = Date.now();
+    const c = marketsIndexRef.current;
+    if (c && now - c.loadedAt < MARKETS_INDEX_TTL_MS) return c.markets;
+    const res = await fetch('/api/markets?limit=5000');
+    const json = await res.json();
+    const markets: Market[] = Array.isArray(json?.markets) ? json.markets : [];
+    marketsIndexRef.current = { loadedAt: now, markets };
+    return markets;
+  }, []);
+
   // ── Copy Trade to Clipboard ──
   const copyTrade = useCallback((trade: TerminalTrade | WhaleAlert) => {
     const typePart = 'type' in trade ? (trade as TerminalTrade).type : 'BUY';
@@ -541,144 +584,254 @@ export default function TerminalPage() {
   // ══════════════════════════════════════════════════════════════════════════
   // INSTANT TRADE — executes immediately, no confirmation
   // ══════════════════════════════════════════════════════════════════════════
-  const executeInstantTrade = useCallback(async (trade: TerminalTrade | WhaleAlert, quantityOverride?: number) => {
-    if (!user) {
-      toast.error('Please sign in to trade');
-      return;
-    }
-
-    // For RWA stock trades, route to the RWA detail panel instead of using
-    // the Polymarket/Kalshi instant trade endpoint.
-    if ('provider' in trade && trade.provider === 'RWA') {
-      const all = rwaStocksRef.current || [];
-      const rwaFromMint = all.find((s) => s.mint === trade.marketId);
-      const rwaFromSymbol = rwaFromMint || all.find((s) => s.symbol === trade.marketName);
-      const target = rwaFromMint || rwaFromSymbol || null;
-      if (target) {
-        setSelectedRwa(target);
-        return;
-      }
-      toast.error('RWA trade details unavailable for instant trade');
-      return;
-    }
-
-    const tradeId = trade.id;
-    setInstantTradeProcessing(tradeId);
-
-    try {
-      const wallet = await getWallet();
-      if (!wallet) {
-        toast.error('Wallet not connected — please connect your wallet');
-        setInstantTradeProcessing(null);
-        return;
-      }
-
-      const side = (trade.side === 'Yes' || trade.side === 'Up') ? 'yes' : 'no';
-      const market = buildMarketFromTrade(trade);
-
-      const quantity = quantityOverride && quantityOverride > 0 ? quantityOverride : instantTradeShares;
-
-      const providerLower = (market.provider || 'polymarket').toLowerCase();
-      let extUrl = '';
-      if (providerLower === 'kalshi') {
-        extUrl = market.kalshiUrl || (() => {
-          const raw = (trade.marketId || '').replace(/^kalshi-/i, '');
-          const seriesPart = raw.split('-')[0].toLowerCase();
-          return seriesPart.length > 2 ? `https://kalshi.com/markets/${seriesPart}` : 'https://kalshi.com/markets';
-        })();
-      } else {
-        if (market.polymarketUrl) {
-          extUrl = market.polymarketUrl;
-        } else if (market.slug && !market.slug.startsWith('0x') && market.slug.length > 5) {
-          extUrl = `https://polymarket.com/event/${market.slug}`;
-        } else if (trade.externalUrl && !trade.externalUrl.includes('/event/0x')) {
-          extUrl = trade.externalUrl;
-        } else {
-          extUrl = 'https://polymarket.com';
+  const executeInstantTrade = useCallback(
+    async (trade: TerminalTrade | WhaleAlert, quantityOverride?: number) => {
+      // RWA → in-app swap panel
+      if ('provider' in trade && trade.provider === 'RWA') {
+        const all = rwaStocksRef.current || [];
+        const rwaFromMint = all.find((s) => s.mint === trade.marketId);
+        const rwaFromSymbol = rwaFromMint || all.find((s) => s.symbol === trade.marketName);
+        const target = rwaFromMint || rwaFromSymbol || null;
+        if (target) {
+          setSelectedRwa(target);
+          return;
         }
+        toast.error('RWA trade details unavailable for instant trade');
+        return;
       }
 
-      const res = await fetch('/api/buy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet,
-          marketId: market.id || market.conditionId,
-          provider: providerLower,
-          side,
-          outcome: trade.side,
-          quantity,
-          marketName: trade.marketName,
-          category: ('category' in trade ? (trade as TerminalTrade).category : '') || 'General',
-          externalUrl: extUrl || undefined,
-          outcomeIndex: ('outcomeIndex' in trade ? (trade as TerminalTrade).outcomeIndex : undefined),
-          tokenId: ('tokenId' in trade ? (trade as TerminalTrade).tokenId : undefined),
-        }),
-      });
+      // Bags / Pump.fun → Memes trade modal (deep link)
+      if ('provider' in trade && trade.provider === 'Bags') {
+        const mint = (trade as TerminalTrade).tokenId || trade.marketId;
+        if (mint) {
+          router.push(`/bags?tab=bags&tradeMint=${encodeURIComponent(mint)}`);
+          toast.success('Open Memes to complete your Bags trade');
+          return;
+        }
+        toast.error('Missing Bags token mint');
+        return;
+      }
+      if ('provider' in trade && trade.provider === 'Pump.fun') {
+        const mint = (trade as TerminalTrade).tokenId || trade.marketId;
+        if (mint) {
+          router.push(`/bags?tab=pump&tradeMint=${encodeURIComponent(mint)}`);
+          toast.success('Open Memes to complete your Pump.fun trade');
+          return;
+        }
+        toast.error('Missing token mint');
+        return;
+      }
 
-      const data = await res.json();
+      const tradeId = trade.id;
+      const quantity =
+        quantityOverride && quantityOverride > 0 ? quantityOverride : instantTradeShares;
+      const sideYes = trade.side === 'Yes' || trade.side === 'Up';
+      setInstantTradeProcessing(tradeId);
 
-      // Debug: verify the API used the correct price
-      console.log('[InstantTrade] Response:', {
-        priceSent: trade.price,
-        priceUsed: data.priceUsed,
-        priceReceived: data.priceReceived,
-        cost: data.cost,
-        success: data.success,
-      });
+      try {
+        const isPred =
+          (trade as TerminalTrade).provider === 'Polymarket' ||
+          (trade as TerminalTrade).provider === 'Kalshi';
 
-      if (res.ok && !data.error) {
-        setInstantTradeSuccess(tradeId);
-        playClick();
-        const executedPrice = data.priceUsed || trade.price;
-        toast(
-          (t) => (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={{ fontWeight: 600 }}>
-                ⚡ {quantity} {trade.side} @ {(executedPrice * 100).toFixed(1)}¢
-              </span>
-              <span style={{ fontSize: '12px', opacity: 0.8 }}>{trade.marketName}</span>
-              <button
-                onClick={() => { toast.dismiss(t.id); router.push('/terminal'); }}
-                style={{
-                  marginTop: '4px',
-                  padding: '6px 12px',
-                  borderRadius: '9999px',
-                  background: '#4FFFC8',
-                  color: '#000',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  fontSize: '12px',
-                }}
-              >
-                View in Terminal →
-              </button>
-            </div>
-          ),
-          {
-            duration: 5000,
-            style: { background: '#0a0a0a', color: '#4FFFC8', border: '1px solid #4FFFC8', maxWidth: '360px' },
+        // ── Jupiter Prediction (on-chain, same as Markets TradePanel)
+        if (
+          isPred &&
+          walletConnected &&
+          publicKey &&
+          typeof signTransaction === 'function'
+        ) {
+          const markets = await loadMarketsIndex();
+          const m = findMarketForJupiterTrade(trade, markets);
+          const jupMarketId = String(
+            (m as any)?.jupMarketId || m?.slug || m?.conditionId || trade.marketId || '',
+          ).trim();
+
+          if (jupMarketId) {
+            let unitPrice =
+              typeof trade.price === 'number' &&
+              Number.isFinite(trade.price) &&
+              trade.price > 0 &&
+              trade.price <= 1
+                ? trade.price
+                : 0;
+            if (unitPrice <= 0 && m) {
+              unitPrice = sideYes ? (m.yesPrice ?? m.price) : (m.noPrice ?? 1 - (m.price ?? 0));
+            }
+            if (unitPrice > 0 && unitPrice <= 1) {
+              const cost = unitPrice * quantity;
+              const depositAmountMicro = Math.max(1, Math.ceil(cost * 1_000_000));
+              const orderResp = await fetch('/api/jup/prediction/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  ownerPubkey: publicKey.toBase58(),
+                  depositAmount: String(depositAmountMicro),
+                  depositMint: USDC_MINT_PREDICTION,
+                  marketId: jupMarketId,
+                  isYes: sideYes,
+                  isBuy: true,
+                }),
+              }).then((r) => r.json());
+
+              if (orderResp?.error) {
+                toast.error(String(orderResp.error).slice(0, 200));
+                return;
+              }
+              const txB64: string | undefined = orderResp?.transaction;
+              if (txB64) {
+                const sig = await signAndSendBase64Tx(txB64);
+                setInstantTradeSuccess(tradeId);
+                playClick();
+                toast.success(`On-chain order confirmed ${sig.slice(0, 4)}…${sig.slice(-4)}`);
+                void loadJupPositions();
+                setTimeout(() => setInstantTradeSuccess(null), 2000);
+                return;
+              }
+              toast.error('Jupiter did not return a transaction');
+              return;
+            }
+            toast.error('Could not determine market price for on-chain trade');
+            return;
           }
-        );
-        setTimeout(() => setInstantTradeSuccess(null), 2000);
-      } else {
-        const errMsg = data.error || 'Trade failed';
-        if (errMsg.includes('No active challenge')) {
-          toast.error('Live trading from this terminal is not enabled for your account.');
-        } else if (errMsg.includes('Insufficient')) {
-          toast.error('Insufficient balance for this trade');
-        } else {
-          toast.error(`Trade failed: ${errMsg}`);
         }
+
+        // ── Simulated challenge trading (/api/buy) — requires auth + linked wallet
+        if (!user) {
+          toast.error(
+            'Connect a Solana wallet for on-chain prediction trades, or sign in with an active challenge account for simulated trading.',
+          );
+          return;
+        }
+
+        const wallet = await getWallet();
+        if (!wallet) {
+          toast.error('Wallet not connected — please connect your wallet');
+          return;
+        }
+
+        const side = sideYes ? 'yes' : 'no';
+        const market = buildMarketFromTrade(trade);
+        const providerLower = (market.provider || 'polymarket').toLowerCase();
+        let extUrl = '';
+        if (providerLower === 'kalshi') {
+          extUrl =
+            market.kalshiUrl ||
+            (() => {
+              const raw = (trade.marketId || '').replace(/^kalshi-/i, '');
+              const seriesPart = raw.split('-')[0].toLowerCase();
+              return seriesPart.length > 2
+                ? `https://kalshi.com/markets/${seriesPart}`
+                : 'https://kalshi.com/markets';
+            })();
+        } else {
+          if (market.polymarketUrl) {
+            extUrl = market.polymarketUrl;
+          } else if (market.slug && !market.slug.startsWith('0x') && market.slug.length > 5) {
+            extUrl = `https://polymarket.com/event/${market.slug}`;
+          } else if (trade.externalUrl && !trade.externalUrl.includes('/event/0x')) {
+            extUrl = trade.externalUrl;
+          } else {
+            extUrl = 'https://polymarket.com';
+          }
+        }
+
+        const res = await fetch('/api/buy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            wallet,
+            marketId: market.id || market.conditionId,
+            provider: providerLower,
+            side,
+            outcome: trade.side,
+            quantity,
+            marketName: trade.marketName,
+            category: ('category' in trade ? (trade as TerminalTrade).category : '') || 'General',
+            externalUrl: extUrl || undefined,
+            outcomeIndex: ('outcomeIndex' in trade ? (trade as TerminalTrade).outcomeIndex : undefined),
+            tokenId: ('tokenId' in trade ? (trade as TerminalTrade).tokenId : undefined),
+          }),
+        });
+
+        const data = await res.json();
+
+        if (res.ok && !data.error) {
+          setInstantTradeSuccess(tradeId);
+          playClick();
+          const executedPrice = data.priceUsed || trade.price;
+          toast(
+            (t) => (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <span style={{ fontWeight: 600 }}>
+                  ⚡ Simulated: {quantity} {trade.side} @ {(executedPrice * 100).toFixed(1)}¢
+                </span>
+                <span style={{ fontSize: '12px', opacity: 0.8 }}>{trade.marketName}</span>
+                <button
+                  onClick={() => {
+                    toast.dismiss(t.id);
+                    router.push('/terminal');
+                  }}
+                  style={{
+                    marginTop: '4px',
+                    padding: '6px 12px',
+                    borderRadius: '9999px',
+                    background: '#4FFFC8',
+                    color: '#000',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    fontSize: '12px',
+                  }}
+                >
+                  View in Terminal →
+                </button>
+              </div>
+            ),
+            {
+              duration: 5000,
+              style: {
+                background: '#0a0a0a',
+                color: '#4FFFC8',
+                border: '1px solid #4FFFC8',
+                maxWidth: '360px',
+              },
+            },
+          );
+          setTimeout(() => setInstantTradeSuccess(null), 2000);
+        } else {
+          const errMsg = data.error || 'Trade failed';
+          if (errMsg.includes('No active challenge')) {
+            toast.error(
+              'No active challenge balance. Connect wallet and use on-chain trading, or start a challenge.',
+            );
+          } else if (errMsg.includes('Insufficient')) {
+            toast.error('Insufficient balance for this trade');
+          } else {
+            toast.error(`Trade failed: ${errMsg}`);
+          }
+        }
+      } catch (err: any) {
+        console.error('[InstantTrade] Error:', err);
+        toast.error(err?.message || 'Network error — try again');
+      } finally {
+        setInstantTradeProcessing(null);
       }
-    } catch (err: any) {
-      console.error('[InstantTrade] Error:', err);
-      toast.error('Network error — try again');
-    } finally {
-      setInstantTradeProcessing(null);
-    }
-  }, [user, getWallet, instantTradeShares, buildMarketFromTrade, playClick]);
+    },
+    [
+      user,
+      getWallet,
+      instantTradeShares,
+      buildMarketFromTrade,
+      playClick,
+      router,
+      walletConnected,
+      publicKey,
+      signTransaction,
+      loadMarketsIndex,
+      signAndSendBase64Tx,
+      loadJupPositions,
+    ],
+  );
 
   // ── Open Trade Panel (expand button — full trade UI) ──
   // Fetches the REAL market data from /api/markets so the panel shows full
@@ -877,12 +1030,20 @@ export default function TerminalPage() {
           if (newCount > 0) playClick();
         }
 
-        setTrades(prev => {
+        setTrades((prev) => {
           if (prev.length === 0) return incoming.slice(0, 600);
-          const existingIds = new Set(prev.map(t => t.id));
-          const brandNew = incoming.filter(t => !existingIds.has(t.id));
-          if (brandNew.length === 0) return prev;
-          return [...brandNew, ...prev].slice(0, 600);
+          // Union by id: incoming wins (fresh snapshot + RWA/Bags/Pump refs), then keep any
+          // prev-only rows until capacity (avoids dropping wallet-injected trades if ids lag one poll).
+          const byId = new Map<string, TerminalTrade>();
+          for (const t of incoming) {
+            if (t?.id) byId.set(t.id, t);
+          }
+          for (const t of prev) {
+            if (t?.id && !byId.has(t.id)) byId.set(t.id, t);
+          }
+          return Array.from(byId.values())
+            .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+            .slice(0, 600);
         });
 
         const incomingWhales: WhaleAlert[] = data.whaleAlerts || [];
@@ -1473,37 +1634,42 @@ export default function TerminalPage() {
 
   // ── Filtered live trades (advanced) ──
   const filteredTrades = useMemo(() => trades.filter(t => {
-    // Sub-tab filter
-    if (liveSubTab === 'orders' && t.type !== 'ORDER') return false;
-    if (liveSubTab === 'fills' && t.type !== 'FILL' && t.type !== 'BUY' && t.type !== 'SELL') return false;
-    // Provider filter
+    const isPred = isPredictionMarketTrade(t);
+
+    // Sub-tabs: "Orders" = Polymarket/Kalshi ORDER events only; RWA/Bags/Pump stay visible (BUY/SELL).
+    if (liveSubTab === 'orders') {
+      if (isPred && t.type !== 'ORDER') return false;
+    } else if (liveSubTab === 'fills') {
+      if (t.type !== 'FILL' && t.type !== 'BUY' && t.type !== 'SELL') return false;
+    }
+
     if (filterProvider !== 'all' && t.provider !== filterProvider) return false;
-    // Side filter
-    if (filterSide !== 'all') {
+
+    // Yes/No = outcome side for prediction markets only (not token BUY/SELL on Solana).
+    if (filterSide !== 'all' && isPred) {
       const tradeSide = t.side === 'Yes' || t.side === 'Up' ? 'Yes' : 'No';
       if (filterSide !== tradeSide) return false;
     }
-    // Min notional
+
     if (filterMinNotional > 0 && t.notional < filterMinNotional) return false;
-    // Price range (in cents)
-    if (filterPriceRange !== 'all') {
+
+    // Implied probability bands (0–100¢) only make sense for Poly/Kalshi; RWA/Bags/Pump use USD prices.
+    if (filterPriceRange !== 'all' && isPred) {
       const cents = t.price * 100;
       if (filterPriceRange === '0-25' && (cents < 0 || cents > 25)) return false;
       if (filterPriceRange === '25-50' && (cents < 25 || cents > 50)) return false;
       if (filterPriceRange === '50-75' && (cents < 50 || cents > 75)) return false;
       if (filterPriceRange === '75-100' && (cents < 75 || cents > 100)) return false;
     }
-    // Category
+
     if (filterCategory !== 'all' && t.category && t.category.toLowerCase() !== filterCategory.toLowerCase()) return false;
-    // Whale only
     if (filterWhaleOnly && !t.isWhale) return false;
-    // Trade size tier filter
     if (filterTradeTier === 'low' && t.notional > 250) return false;
     if (filterTradeTier === 'medium' && (t.notional <= 250 || t.notional > 3000)) return false;
     if (filterTradeTier === 'high' && t.notional <= 3000) return false;
-    // Fast markets only
-    if (filterFastOnly && (t.category || '').toLowerCase() !== 'fast markets') return false;
-    // Search
+
+    if (filterFastOnly && isPred && (t.category || '').toLowerCase() !== 'fast markets') return false;
+
     if (filterSearch) {
       const q = filterSearch.toLowerCase();
       if (!t.marketName.toLowerCase().includes(q) && !t.marketId.toLowerCase().includes(q)) return false;
@@ -2155,6 +2321,8 @@ export default function TerminalPage() {
                   <div className="w-px h-5 bg-[#1A1A1A] mx-1" />
 
                   <button
+                    type="button"
+                    title="YES outcome — Polymarket & Kalshi only"
                     onClick={() => setFilterSide(filterSide === 'Yes' ? 'all' : 'Yes')}
                     className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
                       filterSide === 'Yes'
@@ -2165,6 +2333,8 @@ export default function TerminalPage() {
                     YES
                   </button>
                   <button
+                    type="button"
+                    title="NO outcome — Polymarket & Kalshi only"
                     onClick={() => setFilterSide(filterSide === 'No' ? 'all' : 'No')}
                     className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
                       filterSide === 'No'
@@ -2257,7 +2427,12 @@ export default function TerminalPage() {
 
                           {/* Price Range */}
                           <div className="mb-3">
-                            <label className="text-[9px] text-slate-500 uppercase tracking-wider mb-1.5 block">Price Range</label>
+                            <label className="text-[9px] text-slate-500 uppercase tracking-wider mb-1.5 block">
+                              Price Range
+                            </label>
+                            <p className="text-[9px] text-slate-600 mb-1.5 leading-snug">
+                              Polymarket &amp; Kalshi only (implied prob.). RWAs and memes ignore this.
+                            </p>
                             <div className="flex gap-1.5 flex-wrap">
                               {[
                                 { v: 'all' as const, label: 'Any' },
@@ -3156,9 +3331,9 @@ export default function TerminalPage() {
           eventTitle={quickTradeEventTitle || undefined}
           isOpen={isQuickTradeOpen}
           onClose={() => setIsQuickTradeOpen(false)}
-          onTrade={(market, side, quantity) => {
-            console.log(`Trade placed: ${quantity} shares of ${side} on ${market.name}`);
+          onTrade={(_market, _side, _quantity) => {
             setIsQuickTradeOpen(false);
+            void loadJupPositions();
           }}
         />
       )}

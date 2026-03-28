@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Loader2, Search, Zap } from 'lucide-react';
 import BagsDetailPanel from '@/app/components/BagsDetailPanel';
 import PumpDetailPanel from '@/app/components/PumpDetailPanel';
@@ -50,6 +51,7 @@ const formatPct = (v: number | undefined | null) =>
   v == null || !Number.isFinite(v) ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 
 export default function BagsPage() {
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<MemeTab>('bags');
 
   const [tokens, setTokens] = useState<BagsTokenRow[]>([]);
@@ -64,6 +66,18 @@ export default function BagsPage() {
   const [profileMap, setProfileMap] = useState<
     Record<string, { name?: string; symbol?: string; imageUrl?: string | null }>
   >({});
+
+  // Deep-link from Terminal (instant trade on Bags / Pump.fun rows)
+  useEffect(() => {
+    const mint = searchParams.get('tradeMint');
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'pump') setTab('pump');
+    else if (tabParam === 'bags') setTab('bags');
+    if (mint) {
+      if (tabParam === 'pump') setSelectedPumpMint(mint);
+      else setSelectedMint(mint);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (tab !== 'bags') return;
