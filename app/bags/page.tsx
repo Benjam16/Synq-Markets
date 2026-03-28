@@ -101,9 +101,12 @@ export default function BagsPage() {
         const res = await fetch('/api/pump/tokens?limit=120', { cache: 'no-store' });
         const json = await res.json();
         if (!cancelled) {
-          setPumpTokens(Array.isArray(json?.tokens) ? json.tokens : []);
-          if (json?.error && (!json?.tokens || json.tokens.length === 0)) {
-            setPumpError(String(json.error));
+          const list = Array.isArray(json?.tokens) ? json.tokens : [];
+          setPumpTokens(list);
+          if (list.length === 0) {
+            setPumpError(json?.error ? String(json.error) : 'No tokens returned');
+          } else {
+            setPumpError(null);
           }
         }
       } catch (e: any) {
@@ -269,7 +272,8 @@ export default function BagsPage() {
                 </div>
               ) : (
                 <div className="mt-4 text-[11px] text-slate-600">
-                  Check `JUPITER_API_KEY` and network access to Jupiter quote API.
+                  Lists come from GeckoTerminal (<span className="font-mono">pumpswap</span>). If you see{' '}
+                  <span className="font-mono">429</span>, wait a minute and reload — the app paces requests and caches results. Jupiter is only used when you tap Trade.
                 </div>
               )}
               <button
