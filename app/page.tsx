@@ -4,7 +4,6 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { 
   ArrowRight, 
-  TrendingUp, 
   Shield, 
   Zap, 
   Filter, 
@@ -19,6 +18,7 @@ import {
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from './components/AuthProvider';
+import BrandLogo from './components/BrandLogo';
 import { Market } from '@/lib/types';
 
 export default function LandingPage() {
@@ -144,12 +144,7 @@ export default function LandingPage() {
       <header className="fixed top-0 left-0 right-0 z-[9999] w-full">
         <nav className="w-full h-16 bg-[#050505]/95 backdrop-blur-md border-b border-[#1A1A1A] flex items-center">
           <div className="max-w-7xl mx-auto px-6 w-full flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-[#4FFFC8] rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(79,255,200,0.3)]">
-                <TrendingUp className="w-6 h-6 text-black" strokeWidth={1.5} />
-              </div>
-              <Link href="/" className="text-2xl font-black text-white tracking-tighter uppercase">Synq</Link>
-            </div>
+            <BrandLogo variant="landing" size={40} />
             
             <div className="hidden lg:flex items-center gap-10">
               <Link

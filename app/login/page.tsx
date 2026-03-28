@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Wallet } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
@@ -31,8 +32,19 @@ export default function LoginPage() {
         className="w-full max-w-[400px]"
       >
         <div className="text-center mb-10">
-          <Link href="/" className="inline-block">
-            <div className="text-2xl font-semibold text-white mb-1 tracking-tight">Synq</div>
+          <Link
+            href="/"
+            className="inline-flex flex-col items-center gap-3 group hover:opacity-95 transition-opacity"
+          >
+            <Image
+              src="/synq-logo.png"
+              alt="Synq"
+              width={48}
+              height={48}
+              className="object-contain"
+              priority
+            />
+            <div className="text-2xl font-semibold text-white tracking-tight">Synq</div>
             <div className="text-sm text-slate-400">Onchain Trading Platform</div>
           </Link>
         </div>

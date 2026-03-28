@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Briefcase, AlertTriangle, TrendingUp, LogOut, Home, Menu, X, User, Archive, BarChart3, Shield, Target, Monitor, Layers, Package, BookOpen } from "lucide-react";
+import { LayoutDashboard, Briefcase, AlertTriangle, LogOut, Home, Menu, X, User, Archive, BarChart3, Shield, Target, Monitor, Layers, Package, BookOpen } from "lucide-react";
 import { useAuth } from "./AuthProvider";
+import BrandLogo from "./BrandLogo";
 import { useState, useEffect, useCallback } from "react";
 import { NotificationCenter } from "./NotificationCenter";
 
@@ -93,12 +94,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="relative flex items-center justify-between h-full">
             {/* Left: Logo and Brand Name */}
             <div className="flex-shrink-0 z-10">
-              <Link href="/" className="flex items-center gap-3 group">
-                <div className="w-9 h-9 bg-[#4FFFC8] rounded-full flex items-center justify-center group-hover:scale-105 transition-transform shadow-[0_0_20px_rgba(79,255,200,0.3)]">
-                  <TrendingUp className="w-5 h-5 text-black" strokeWidth={1.5} />
-                </div>
-                <div className="text-xl font-bold text-white tracking-tight">Synq</div>
-              </Link>
+              <BrandLogo />
             </div>
 
             {/* Center: All Navigation Links - Absolutely centered in viewport */}
@@ -224,12 +220,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         
       {/* Mobile Menu Button */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-[80] h-16 bg-[#050505]/95 backdrop-blur-md border-b border-[#1A1A1A] px-4 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-[#4FFFC8] rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(79,255,200,0.3)]">
-            <TrendingUp className="w-5 h-5 text-black" strokeWidth={1.5} />
-          </div>
-          <div className="text-xl font-semibold text-white tracking-tight">Synq</div>
-        </Link>
+        <BrandLogo className="font-semibold [&_span]:font-semibold" />
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="p-2 text-slate-500 hover:text-white rounded-lg transition-colors"
