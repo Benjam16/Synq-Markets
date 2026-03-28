@@ -1,125 +1,76 @@
-Prop Market – Prediction Market Prop Firm Dashboard
-===================================================
-
-This app is a Next.js dashboard for a prediction-market style prop firm (Kalshi / Polymarket).
-
-## Quick start
-
-1. **Install dependencies**
-
+# Synq
+Synq is a wallet-native onchain trading dashboard with:
+- **Predictions**: Polymarket + Kalshi market browsing and activity
+- **Terminal**: a unified live feed (Polymarket, Kalshi, RWAs, Bags) with fast-trade entry
+- **RWAs**: tokenized RWAs (stocks) traded via **Dflow**
+- **Bags**: Bags token discovery + swaps executed via the **Bags API**
+- **Docs**: an in-app `/docs` page explaining the platform
+---
+## Quick start (local)
+### 1) Install
 ```bash
 npm install
-```
+2) Create .env.local
+Create a file named .env.local in the repo root.
 
-2. **Configure database (Supabase Postgres)**
+Minimum recommended (matches how the app is built today):
 
-Create a file named `.env.local` in the project root with:
-
-```bash
-DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.iphqnpapflhznzsaqkah.supabase.co:5432/postgres?sslmode=require"
+# Supabase / DB (if you use the DB-backed pages)
+DATABASE_URL="..."
 PGSSLMODE=require
-```
-
-Replace `YOUR_PASSWORD` with the password from your Supabase project settings (Database → Connection string → URI).
-
-3. **Prepare Postgres**
-
-In Supabase SQL editor:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS citext;
-```
-
-Then copy–paste and run the contents of `db/schema.sql`.
-
-4. **Seed tiers + demo user + active challenge**
-
-From the project root:
-
-```bash
-DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.iphqnpapflhznzsaqkah.supabase.co:5432/postgres?sslmode=require" npm run seed
-```
-
-This will:
-
-- Upsert account tiers (Scout, Analyst, Strategist, Whale, VIP)
-- Create a `demo@prop.local` trader
-- Create a 100k “Strategist” challenge subscription for that user
-
-5. **Run the app**
-
-```bash
+NEXT_PUBLIC_SUPABASE_URL="..."
+NEXT_PUBLIC_SUPABASE_ANON_KEY="..."
+# Kalshi (Terminal + prediction data)
+KALSHI_ACCESS_KEY="..."
+KALSHI_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+# Jupiter (some prediction helpers)
+JUPITER_API_KEY="..."
+# Solana RPC
+NEXT_PUBLIC_SOLANA_RPC_URL="https://api.mainnet-beta.solana.com"
+# (optional, used by some server-side helpers if set)
+SOLANA_RPC_URL="https://api.mainnet-beta.solana.com"
+# Dflow (RWAs trading + discovery)
+DFLOW_QUOTE_BASE_URL="https://e.quote-api.dflow.net"
+DFLOW_PM_BASE_URL="https://e.prediction-markets-api.dflow.net"
+DFLOW_API_KEY="..."
+# CoinGecko (core prices + RWA stats)
+COINGECKO_API_KEY="..."
+COINGECKO_ONCHAIN_BASE_URL="https://api.coingecko.com/api/v3/onchain"
+# Bags
+BAGS_BASE_URL="https://public-api-v2.bags.fm/api/v1"
+BAGS_API_KEY="..."
+3) Run
 npm run dev
-```
+Open http://localhost:3000.
 
-Open `http://localhost:3000` in your browser.
+Vercel deployment
+Add environment variables
+In Vercel: Project → Settings → Environment Variables
 
-6. **Set the user id in the browser (temporary auth)**
+Add the same keys from .env.local (values without quotes) to:
 
-Open your browser devtools console on `http://localhost:3000` and run:
+Production
+Preview (recommended)
+Development (optional)
+Then redeploy.
 
-```js
-localStorage.setItem("userId", "1");
-location.reload();
-```
-
-Once you plug in a real auth system, replace this with your logged-in user’s id.
-
-## Background workers (optional, for live risk & prices)
-
-These scripts assume the same `DATABASE_URL` and (for Kalshi) API keys in the environment.
-
-### Install Python dependencies
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-### 1. **Unified Market Data Worker (Kalshi + Polymarket)**
-
-**Recommended:** Use the unified worker that handles both Kalshi and Polymarket via REST API polling. This is the most reliable approach and works immediately.
-
-```bash
-source scripts/set_kalshi_env.sh
-export $(grep -v '^#' .env.local | xargs)
-python3 scripts/market_data_worker.py
-```
-
-Or use the master script:
-
-```bash
-./scripts/run_all_workers.sh
-```
-
-This worker:
-- Fetches market data from both Kalshi and Polymarket every 30 seconds
-- Writes prices to `market_price_cache` table
-- Works without needing WebSocket subscription formats
-
-**Kalshi WebSocket (optional, for real-time):**
-
-If you want to use Kalshi WebSocket for real-time updates (once subscription format is confirmed):
-
-```bash
-source scripts/set_kalshi_env.sh
-export $(grep -v '^#' .env.local | xargs)
-python3 scripts/kalshi_ws_worker.py
-```
-
-**Note:** The WebSocket worker connects successfully but needs the correct subscription format from Kalshi's API docs. The worker logs all messages so you can see what Kalshi sends and adjust accordingly.
-
-### 2. **Drawdown monitor (every minute)**
-
-Cron entry:
-
-```bash
-* * * * * TZ=America/New_York DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.iphqnpapflhznzsaqkah.supabase.co:5432/postgres?sslmode=require" python scripts/drawdown_monitor.py
-```
-
-3. **Midnight reset (12:00 AM ET)**
-
-```bash
-0 0 * * * TZ=America/New_York DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.iphqnpapflhznzsaqkah.supabase.co:5432/postgres?sslmode=require" python scripts/midnight_reset.py
-```
-
-You can move these into a small worker VM or container in production.
+Common deployment issues
+RWAs page empty with a CoinGecko 401: COINGECKO_API_KEY is missing in Vercel.
+Bags page empty: BAGS_API_KEY is missing/incorrect in Vercel.
+GitHub push rejected: don’t commit files > 100MB (GitHub will reject them).
+How trading routes
+RWAs (Dflow)
+Quotes and execution are routed through Synq API routes that call Dflow.
+The connected wallet signs and submits the returned Solana transaction.
+Bags (Bags API)
+Quotes come from Bags GET /trade/quote (proxied through Synq).
+Execution uses Bags POST /trade/swap (proxied), returning a transaction your wallet signs and sends.
+Key pages
+/markets — Predictions markets browsing
+/terminal — Unified live activity feed + filters/tags
+/stocks — RWAs screener + detail panel trading
+/bags — Bags tokens list + trading modal
+/docs — In-app documentation
+Notes
+Some market stats (mcap/fdv/24h change) may be missing for very new tokens until upstream providers index them.
+The app uses short-lived caching in some API routes to avoid rate limits and improve UI responsiveness.
