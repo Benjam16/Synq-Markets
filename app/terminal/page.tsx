@@ -64,7 +64,7 @@ const ChartModal = dynamic(() => import('../components/ChartModal'), { ssr: fals
 
 interface TerminalTrade {
   id: string;
-  provider: 'Polymarket' | 'Kalshi' | 'RWA' | 'Bags';
+  provider: 'Polymarket' | 'Kalshi' | 'RWA' | 'Bags' | 'Pump.fun';
   type: 'BUY' | 'SELL' | 'FILL' | 'ORDER' | 'FEE_REFUND';
   marketId: string;
   marketName: string;
@@ -241,7 +241,9 @@ export default function TerminalPage() {
   const [liveSubTab, setLiveSubTab] = useState<'all' | 'orders' | 'fills'>('all');
   const [isMobile, setIsMobile] = useState<boolean | null>(null);
   // ── Advanced Filters ──
-  const [filterProvider, setFilterProvider] = useState<'all' | 'Polymarket' | 'Kalshi' | 'RWA' | 'Bags'>('all');
+  const [filterProvider, setFilterProvider] = useState<
+    'all' | 'Polymarket' | 'Kalshi' | 'RWA' | 'Bags' | 'Pump.fun'
+  >('all');
   const [filterSide, setFilterSide] = useState<'all' | 'Yes' | 'No'>('all');
   const [filterMinNotional, setFilterMinNotional] = useState<number>(0);
   const [filterPriceRange, setFilterPriceRange] = useState<'all' | '0-25' | '25-50' | '50-75' | '75-100'>('all');
@@ -282,6 +284,7 @@ export default function TerminalPage() {
   const rwaTradesRef = useRef<TerminalTrade[]>([]);
   const bagsMintsRef = useRef<string[]>([]);
   const bagsTradesRef = useRef<TerminalTrade[]>([]);
+  const pumpTradesRef = useRef<TerminalTrade[]>([]);
 
   // Keep pause ref in sync for use inside polling closure
   feedPausedRef.current = feedPaused;
@@ -809,7 +812,7 @@ export default function TerminalPage() {
           // ignore merge errors; fall back to backend snapshot
         }
 
-        // Merge in any locally-buffered Bags trades (last 1h) so they
+        // Merge in any locally-buffered Bags / Pump.fun trades (last 1h) so they
         // persist across backend snapshot refreshes.
         try {
           const nowTs = Date.now();
@@ -818,8 +821,12 @@ export default function TerminalPage() {
             const ts = Date.parse(t.timestamp);
             return !Number.isNaN(ts) && (nowTs - ts) <= ONE_HOUR;
           });
+          const pump = (pumpTradesRef.current || []).filter((t) => {
+            const ts = Date.parse(t.timestamp);
+            return !Number.isNaN(ts) && (nowTs - ts) <= ONE_HOUR;
+          });
           const byId = new Map<string, TerminalTrade>();
-          for (const t of [...incoming, ...bags]) {
+          for (const t of [...incoming, ...bags, ...pump]) {
             if (!t || !t.id) continue;
             byId.set(t.id, t);
           }
@@ -1215,6 +1222,63 @@ export default function TerminalPage() {
     if (typeof window !== 'undefined') {
       window.addEventListener('bags-trade-executed', handler as any);
       return () => window.removeEventListener('bags-trade-executed', handler as any);
+    }
+  }, []);
+
+  // ── Listen for executed Pump.fun (Jupiter) trades and inject into live feed ──
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const e = ev as CustomEvent<{
+        mint: string;
+        side: 'buy' | 'sell';
+        quoteAsset: 'USDC' | 'SOL';
+        uiAmount: number;
+        timestamp: string;
+      }>;
+      const detail = e.detail;
+      if (!detail?.mint) return;
+
+      const sideIsBuy = detail.side === 'buy';
+      const shares = Math.max(1, Number(detail.uiAmount) || 0);
+      const notional = Math.max(0, shares);
+      const nowIso = detail.timestamp || new Date().toISOString();
+
+      const trade: TerminalTrade = {
+        id: `pump-${detail.mint}-${Date.now()}`,
+        provider: 'Pump.fun',
+        type: sideIsBuy ? 'BUY' : 'SELL',
+        marketId: detail.mint,
+        marketName: 'Pump.fun token',
+        side: sideIsBuy ? 'Yes' : 'No',
+        price: 0,
+        priceCents: `${(0).toFixed(1)}¢`,
+        shares,
+        notional,
+        fee: 0,
+        timestamp: nowIso,
+        isWhale: notional >= 2000,
+        externalUrl: '/bags',
+        category: 'Pump.fun',
+        tokenId: detail.mint,
+      };
+
+      try {
+        const nowTs = Date.now();
+        const ONE_HOUR = 60 * 60 * 1000;
+        const existing = Array.isArray(pumpTradesRef.current) ? pumpTradesRef.current : [];
+        const filtered = existing.filter((t) => {
+          const ts = Date.parse(t.timestamp);
+          return !Number.isNaN(ts) && (nowTs - ts) <= ONE_HOUR;
+        });
+        pumpTradesRef.current = [trade, ...filtered].slice(0, 300);
+      } catch {}
+
+      setTrades((prev) => [trade, ...prev].slice(0, 600));
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pump-trade-executed', handler as any);
+      return () => window.removeEventListener('pump-trade-executed', handler as any);
     }
   }, []);
 
@@ -2077,6 +2141,17 @@ export default function TerminalPage() {
                     BAGS
                   </button>
 
+                  <button
+                    onClick={() => setFilterProvider(filterProvider === 'Pump.fun' ? 'all' : 'Pump.fun')}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${
+                      filterProvider === 'Pump.fun'
+                        ? 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30'
+                        : 'text-slate-500 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    PUMP
+                  </button>
+
                   <div className="w-px h-5 bg-[#1A1A1A] mx-1" />
 
                   <button
@@ -2434,6 +2509,11 @@ export default function TerminalPage() {
                           <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-[#4FFFC8]/15 text-[#4FFFC8] border border-[#4FFFC8]/30 flex items-center gap-1">
                             <span className="w-1 h-1 rounded-full bg-[#4FFFC8]" />
                             RWA
+                          </span>
+                        ) : trade.provider === 'Pump.fun' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30 flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-fuchsia-400" />
+                            PUMP
                           </span>
                         ) : (
                           <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-white/[0.06] text-white border border-white/10 flex items-center gap-1">

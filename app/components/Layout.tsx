@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Briefcase, AlertTriangle, TrendingUp, LogOut, Home, Menu, X, User, Trophy, Archive, BarChart3, Shield, Target, Monitor, Layers, Package, BookOpen } from "lucide-react";
+import { LayoutDashboard, Briefcase, AlertTriangle, TrendingUp, LogOut, Home, Menu, X, User, Archive, BarChart3, Shield, Target, Monitor, Layers, Package, BookOpen } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import { useState, useEffect, useCallback } from "react";
 import { NotificationCenter } from "./NotificationCenter";
@@ -57,7 +57,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { href: "/stocks", label: "RWAs", icon: Layers },
     { href: "/bags", label: "Bags", icon: Package },
     { href: "/docs", label: "Docs", icon: BookOpen },
-    { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
   ];
   const secondaryNavItems: NavItem[] = [];
 

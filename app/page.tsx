@@ -840,7 +840,6 @@ export default function LandingPage() {
                 <li><Link href="/terminal" className="hover:text-[#4FFFC8] transition-colors">Terminal</Link></li>
                 <li><Link href="/stocks" className="hover:text-[#4FFFC8] transition-colors">RWAs</Link></li>
                 <li><Link href="/bags" className="hover:text-[#4FFFC8] transition-colors">Bags</Link></li>
-                <li><Link href="/leaderboard" className="hover:text-[#4FFFC8] transition-colors">Leaderboard</Link></li>
               </ul>
             </div>
             
