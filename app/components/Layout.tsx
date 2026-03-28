@@ -55,7 +55,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { href: "/markets", label: "Predictions", icon: BarChart3 },
     { href: "/terminal", label: "Terminal", icon: Monitor },
     { href: "/stocks", label: "RWAs", icon: Layers },
-    { href: "/bags", label: "Bags", icon: Package },
+    { href: "/bags", label: "Memes", icon: Package },
     { href: "/docs", label: "Docs", icon: BookOpen },
   ];
   const secondaryNavItems: NavItem[] = [];

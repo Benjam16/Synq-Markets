@@ -40,10 +40,11 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const onlyMigrated = searchParams.get('onlyMigrated') === 'true';
     // We only ever show the top 50 movers; keep limit bounded accordingly.
-    const limit = Math.min(Number(searchParams.get('limit') || 50), 50);
+    const limit = Math.min(Number(searchParams.get('limit') || 80), 120);
 
     if (
       cached &&
+      cached.rows.length > 0 &&
       cached.onlyMigrated === onlyMigrated &&
       now - cached.updatedAt < TTL_MS
     ) {
@@ -135,18 +136,24 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Keep tokens with a real price AND (non-zero 24h volume OR migrated/graduated),
-    // prefer those with 24h change, sort by absolute 24h move.
+    // Migrated / graduated: always list (Gecko sometimes has no pool yet → missing price).
+    // Active bonds: require finite USD price and non-zero 24h volume from Gecko.
+    // Previously we required price for migrated tokens too, which emptied the list whenever
+    // Gecko was rate-limited or slow; we also avoid caching that empty snapshot.
     const ranked = rows
-      .filter(
-        (r) =>
+      .filter((r) => {
+        const isMigrated = r.migrated === true || r.status === 'MIGRATED';
+        if (isMigrated) return true;
+        const hasPrice =
           typeof r.priceUsd === 'number' &&
           Number.isFinite(r.priceUsd) &&
-          ((typeof r.volume24hUsd === 'number' &&
-            Number.isFinite(r.volume24hUsd) &&
-            r.volume24hUsd > 0) ||
-            r.migrated === true),
-      )
+          r.priceUsd > 0;
+        const hasVol =
+          typeof r.volume24hUsd === 'number' &&
+          Number.isFinite(r.volume24hUsd) &&
+          r.volume24hUsd > 0;
+        return hasPrice && hasVol;
+      })
       .sort((a, b) => {
         const aHasChange =
           typeof a.priceChange24h === 'number' && Number.isFinite(a.priceChange24h);
@@ -159,7 +166,9 @@ export async function GET(req: NextRequest) {
         return bAbs - aAbs;
       });
 
-    cached = { rows: ranked, updatedAt: now, onlyMigrated };
+    if (ranked.length > 0) {
+      cached = { rows: ranked, updatedAt: now, onlyMigrated };
+    }
     return NextResponse.json({
       tokens: ranked.slice(0, limit),
       stale: false,

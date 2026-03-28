@@ -127,7 +127,7 @@ export default function LandingPage() {
   const isMarketsActive = pathname.startsWith('/markets');
   const isTerminalActive = pathname.startsWith('/terminal');
   const isStocksActive = pathname.startsWith('/stocks');
-  const isBagsActive = pathname.startsWith('/bags');
+  const isMemesActive = pathname.startsWith('/bags');
 
   return (
     <div className="min-h-screen bg-[#050505] bg-radial-glow flex flex-col items-center overflow-x-hidden relative">
@@ -185,12 +185,12 @@ export default function LandingPage() {
               <Link
                 href="/bags"
                 className={`text-xs font-semibold tracking-[0.18em] ${
-                  isBagsActive ? 'text-white' : 'text-slate-400 hover:text-[#4FFFC8]'
+                  isMemesActive ? 'text-white' : 'text-slate-400 hover:text-[#4FFFC8]'
                 } pb-0.5 border-b ${
-                  isBagsActive ? 'border-[#4FFFC8]/70' : 'border-transparent'
+                  isMemesActive ? 'border-[#4FFFC8]/70' : 'border-transparent'
                 } transition-colors`}
               >
-                Bags
+                Memes
               </Link>
               {mounted && user ? (
                 <div className="flex items-center gap-4">
@@ -839,7 +839,7 @@ export default function LandingPage() {
                 <li><Link href="/markets" className="hover:text-[#4FFFC8] transition-colors">Live Markets</Link></li>
                 <li><Link href="/terminal" className="hover:text-[#4FFFC8] transition-colors">Terminal</Link></li>
                 <li><Link href="/stocks" className="hover:text-[#4FFFC8] transition-colors">RWAs</Link></li>
-                <li><Link href="/bags" className="hover:text-[#4FFFC8] transition-colors">Bags</Link></li>
+                <li><Link href="/bags" className="hover:text-[#4FFFC8] transition-colors">Memes</Link></li>
               </ul>
             </div>
             
@@ -896,7 +896,7 @@ function InteractiveGridSection() {
           {[
             { label: 'Predictions', value: 'Polymarket · Kalshi' },
             { label: 'RWAs', value: 'Dflow trading + charts' },
-            { label: 'Bags', value: 'Bags API swaps + pools' },
+            { label: 'Memes', value: 'Bags.fm + Pump.fun' },
             { label: 'Terminal', value: 'Unified live feed' },
           ].map((item) => (
             <div
