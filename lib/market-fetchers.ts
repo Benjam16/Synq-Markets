@@ -940,6 +940,51 @@ function formatVolume(vol: number): string {
   return `$${vol.toFixed(0)}`;
 }
 
+/** Parse Kalshi fixed-point string or number. */
+function parseKalshiFp(v: unknown): number {
+  if (v == null || v === '') return NaN;
+  const n = typeof v === 'number' ? v : parseFloat(String(v).trim());
+  return Number.isFinite(n) ? n : NaN;
+}
+
+/**
+ * YES probability 0–1. Kalshi now returns `last_price_dollars` / `yes_bid_dollars`
+ * (decimal strings); legacy responses used cent integers like `last_price`.
+ */
+function kalshiOutcomeYesPrice(m: any, isSettled: boolean, mResult: string): number {
+  if (isSettled) return mResult === 'yes' ? 1.0 : 0.0;
+
+  const lastD = parseKalshiFp(m.last_price_dollars);
+  if (!Number.isNaN(lastD) && lastD > 0) return Math.max(0, Math.min(1, lastD));
+  if (m.last_price != null && m.last_price > 0) return Math.max(0, Math.min(1, m.last_price / 100));
+
+  const bidD = parseKalshiFp(m.yes_bid_dollars);
+  if (!Number.isNaN(bidD) && bidD > 0) return Math.max(0, Math.min(1, bidD));
+  if (m.yes_bid != null && m.yes_bid > 0) return Math.max(0, Math.min(1, m.yes_bid / 100));
+
+  const askD = parseKalshiFp(m.yes_ask_dollars);
+  if (!Number.isNaN(askD) && askD > 0) return Math.max(0, Math.min(1, askD));
+  if (m.yes_ask != null && m.yes_ask > 0) return Math.max(0, Math.min(1, m.yes_ask / 100));
+
+  return 0.01;
+}
+
+/** Approximate traded notional USD for one nested market (contracts × notional, or legacy `volume`). */
+function kalshiMarketVolumeUsd(m: any): number {
+  const notional = parseKalshiFp(m.notional_value_dollars);
+  const per = !Number.isNaN(notional) && notional > 0 ? notional : 1;
+
+  let contracts = parseKalshiFp(m.volume_fp);
+  if (Number.isNaN(contracts) || contracts <= 0) contracts = parseKalshiFp(m.volume_24h_fp);
+  if (Number.isNaN(contracts) || contracts <= 0) {
+    if (m.volume != null) {
+      contracts = typeof m.volume === 'number' ? m.volume : parseKalshiFp(m.volume);
+    }
+  }
+  if (Number.isNaN(contracts) || contracts <= 0) return 0;
+  return contracts * per;
+}
+
 /**
  * Fetch markets from Kalshi REST API v2.
  * 
@@ -1029,19 +1074,7 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
                 const isSettled = mResult === 'yes' || mResult === 'no' ||
                   mStatus === 'settled' || mStatus === 'finalized' || mStatus === 'closed';
 
-                let yesPrice: number;
-                if (isSettled) {
-                  yesPrice = mResult === 'yes' ? 1.0 : 0.0;
-                } else if (m.last_price != null && m.last_price > 0) {
-                  yesPrice = m.last_price / 100;
-                } else if (m.yes_bid != null && m.yes_bid > 0) {
-                  yesPrice = m.yes_bid / 100;
-                } else if (m.yes_ask != null && m.yes_ask > 0) {
-                  yesPrice = m.yes_ask / 100;
-                } else {
-                  yesPrice = 0.01;
-                }
-                yesPrice = Math.max(0, Math.min(1, yesPrice));
+                const yesPrice = kalshiOutcomeYesPrice(m, isSettled, mResult);
 
                 let outcomeName = (m.subtitle || m.yes_sub_title || m.title || '')
                   .replace(/^::\s*/g, '')
@@ -1071,17 +1104,26 @@ export async function fetchKalshiMarkets(limit: number = 5000): Promise<UnifiedM
               primaryPrice = firstUnsettled?.price ?? sortedOutcomes[0]?.price ?? 0.5;
               outcomes = sortedOutcomes;
 
-              // Volume: sum across all sub-markets
-              totalVolume = nestedMarkets.reduce((sum: number, m: any) => {
-                return sum + (m.volume || 0);
-              }, 0);
+              // Volume: sum notional across sub-markets (volume_fp contracts × notional_value)
+              totalVolume = nestedMarkets.reduce(
+                (sum: number, m: any) => sum + kalshiMarketVolumeUsd(m),
+                0,
+              );
 
               resolutionDate = firstMkt.close_time ||
                                firstMkt.expected_expiration_time ||
                                firstMkt.expiration_time || '';
 
-              // 24h change
-              if (firstMkt.previous_price != null && firstMkt.last_price != null && firstMkt.previous_price > 0) {
+              // Price change (probability points): prefer dollar-string fields
+              const prevD = parseKalshiFp(firstMkt.previous_price_dollars);
+              const lastD = parseKalshiFp(firstMkt.last_price_dollars);
+              if (!Number.isNaN(prevD) && !Number.isNaN(lastD) && prevD > 0) {
+                change = lastD - prevD;
+              } else if (
+                firstMkt.previous_price != null &&
+                firstMkt.last_price != null &&
+                firstMkt.previous_price > 0
+              ) {
                 change = (firstMkt.last_price - firstMkt.previous_price) / 100;
               }
             }
@@ -1349,9 +1391,11 @@ export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
             : '';
 
           const outcomes = nested.map((m: any, idx: number) => {
-            let p = m.last_price != null && m.last_price > 0 ? m.last_price / 100
-              : m.yes_bid != null && m.yes_bid > 0 ? m.yes_bid / 100
-              : m.yes_ask != null && m.yes_ask > 0 ? m.yes_ask / 100 : 0.5;
+            const mResult = (m.result || '').trim().toLowerCase();
+            const mStatus = (m.status || '').trim().toLowerCase();
+            const isSettled = mResult === 'yes' || mResult === 'no' ||
+              mStatus === 'settled' || mStatus === 'finalized' || mStatus === 'closed';
+            let p = kalshiOutcomeYesPrice(m, isSettled, mResult);
             p = Math.max(0.01, Math.min(0.99, p));
             const name = (m.subtitle || m.yes_sub_title || m.title || '')
               .replace(/^::\s*/g, '').replace(/^--\s*/g, '').trim() || (idx === 0 ? 'Yes' : `Option ${idx + 1}`);
@@ -1359,7 +1403,7 @@ export async function fetchFastCryptoMarkets(): Promise<UnifiedMarket[]> {
           });
 
           const primaryPrice = outcomes.length > 0 ? outcomes[0].price : 0.5;
-          const totalVol = nested.reduce((s: number, m: any) => s + (m.volume || 0), 0);
+          const totalVol = nested.reduce((s: number, m: any) => s + kalshiMarketVolumeUsd(m), 0);
           const resolutionDate = first.close_time || first.expected_expiration_time || first.expiration_time || '';
 
           // Only include markets resolving within the next 24 hours
